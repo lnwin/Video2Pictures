@@ -19,6 +19,7 @@ public:
     QString ffmpegPath=QCoreApplication::applicationDirPath() + "/ffmpeg/bin/ffmpeg.exe";
     QString videoPath;QString outputPath;int frameNumber=20;
     int getVideoFrameCount(const QString &ffmpegPath, const QString &videoPath);
+    double totalSeconds;
     QProcess *process;  // 处理 ffmpeg 进程
 public slots:
     void myCut();
@@ -26,7 +27,7 @@ public slots:
 signals:
     void sendMSG2Main(const QString &);
 
-    void progressUpdated(QString progress);
+    void progressUpdated(float progress);
 };
 
 #endif // MYPROCESS_H

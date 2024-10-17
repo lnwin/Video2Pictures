@@ -11,11 +11,13 @@ CONFIG += c++17
 SOURCES += \
     main.cpp \
     mainwindow.cpp \
-    myprocess.cpp
+    myprocess.cpp \
+    reconstruction.cpp
 
 HEADERS += \
     mainwindow.h \
-    myprocess.h
+    myprocess.h \
+    reconstruction.h
 
 FORMS += \
     mainwindow.ui
@@ -24,3 +26,9 @@ INCLUDEPATH += $$PWD/ffmpeg
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
+win32: LIBS += -LE:/ThirdParty/opencv-4.7.0-NoCudda/opencv/build/x64/vc16/lib/ -lopencv_world470
+
+INCLUDEPATH += E:/ThirdParty/opencv-4.7.0-NoCudda/opencv/build/include
+DEPENDPATH += E:/ThirdParty/opencv-4.7.0-NoCudda/opencv/build/include
+
+INCLUDEPATH += E:/ThirdParty/eigen-3.3.9

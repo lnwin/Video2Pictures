@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QThread>
 #include <myprocess.h>
+#include <reconstruction.h>
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
@@ -36,14 +37,20 @@ private slots:
     void on_FPS_textChanged(const QString &arg1);
 
     void receiveMSG2Main(const QString &);
-    void onProgressUpdated(QString progress);
+    void onProgressUpdated(float progress);
+
+    void on_comboBox_pushDirction_currentIndexChanged(int index);
+
+    void on_speed_textChanged(const QString &arg1);
 
 private:
     Ui::MainWindow *ui;
     QThread* myProcessThread;
     myProcess *myprocess;
+    QThread *myReconstructionThread;
+    reconstruction *myreconstruction;
  signals:
     void start2Cut();
-
+    void startProcess();
 };
 #endif // MAINWINDOW_H

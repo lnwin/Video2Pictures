@@ -13,14 +13,24 @@ MainWindow::MainWindow(QWidget *parent)
     myprocess->moveToThread(myProcessThread);
     myProcessThread->start();
 
+    myReconstructionThread= new QThread();
+    myreconstruction =new reconstruction() ;
+    myreconstruction->moveToThread(myReconstructionThread);
+    myReconstructionThread->start();
+
     connect(this,&MainWindow::start2Cut,myprocess,&myProcess::myCut);
+    connect(this,&MainWindow::startProcess,myreconstruction,&reconstruction::start2process);
+
     connect(myprocess, &myProcess::progressUpdated, this, &MainWindow::onProgressUpdated);
+    connect(myprocess,&myProcess::sendMSG2Main,this,&MainWindow::receiveMSG2Main);
+    connect(myreconstruction,&reconstruction::sendmySG2Main,this,&MainWindow::receiveMSG2Main);
+     connect(myreconstruction,&reconstruction::myprogressUpdated,this,&MainWindow::onProgressUpdated);
+
 }
-void MainWindow::onProgressUpdated(QString progress)
+void MainWindow::onProgressUpdated(float progress)
 {
-    // 在 UI 中更新进度信息
-    qDebug() << progress;
-    ui->progressBar->setValue(progress.toInt());  // 这里假设 progress 是一个百分比值
+
+    ui->progressBar->setValue(progress);  // 这里假设 progress 是一个百分比值
 }
 MainWindow::~MainWindow()
 {
@@ -47,6 +57,7 @@ void MainWindow::on_selectOutputPath_clicked()
         ui->pictureOutPath ->setText(thisDirPath);
     }
     myprocess->outputPath=thisDirPath;
+    myreconstruction->imagePath=thisDirPath;
 }
 
 
@@ -73,13 +84,15 @@ void MainWindow::on_selectCloudOutPath_clicked()
     else
     {
         ui->cloudOutPath ->setText(thisDirPath);
+
+        myreconstruction->outPutCloudPath=thisDirPath;
     }
 }
 
 
 void MainWindow::on_startProcess_clicked()
 {
-
+    emit startProcess();
 }
 
 
@@ -88,4 +101,16 @@ void MainWindow::on_FPS_textChanged(const QString &arg1)
     myprocess->frameNumber=arg1.toInt();
 }
 
+
+
+void MainWindow::on_comboBox_pushDirction_currentIndexChanged(int index)
+{
+    myreconstruction->mydir=index+=1;
+}
+
+
+void MainWindow::on_speed_textChanged(const QString &arg1)
+{
+    myreconstruction->myspeed=arg1.toFloat();
+}
 

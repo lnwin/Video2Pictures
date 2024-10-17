@@ -1,12 +1,16 @@
 #include "myprocess.h"
 
-myProcess::myProcess() {}
-void myProcess::myCut()
+myProcess::myProcess()
 {
     process = new QProcess(this);
+    connect(process, &QProcess::readyReadStandardError, this, &myProcess::updateProgress);
+}
+void myProcess::myCut()
+{
+
     extractFramesFromVideo(ffmpegPath, videoPath,outputPath,frameNumber);
     // 捕获 ffmpeg 输出
-    connect(process, &QProcess::readyReadStandardError, this, &myProcess::updateProgress);
+
 };
 void myProcess::extractFramesFromVideo(const QString &ffmpegPath, const QString &videoPath, const QString &outputPath, int frameNumber)
 {       // 检查视频文件是否存在
@@ -70,7 +74,7 @@ void myProcess::extractFramesFromVideo(const QString &ffmpegPath, const QString 
         // 如果失败，输出错误信息
         QString errorMessage = QString("Frame extraction failed! Exit code: %1\nFFmpeg Error: %2").arg(exitCode).arg(error);
        emit sendMSG2Main(errorMessage);
-        qDebug() << errorMessage;
+        qDebug() << "errorMessage="<<errorMessage;
     }
 }
 int myProcess::getVideoFrameCount(const QString &ffmpegPath, const QString &videoPath) {
@@ -107,7 +111,7 @@ int myProcess::getVideoFrameCount(const QString &ffmpegPath, const QString &vide
     }
 
     // 计算总秒数
-    double totalSeconds = hours * 3600 + minutes * 60 + seconds;
+    totalSeconds = hours * 3600 + minutes * 60 + seconds;
 
     // 计算总帧数
     int frameCount = static_cast<int>(totalSeconds * fps);
@@ -124,8 +128,16 @@ void myProcess::updateProgress()
         int hours = match.captured(1).toInt();
         int minutes = match.captured(2).toInt();
         int seconds = match.captured(3).toInt();
-        int centiseconds = match.captured(4).toInt();
         int currentTimeInSeconds = hours * 3600 + minutes * 60 + seconds;
-        emit progressUpdated(QString("Current Time: %1 seconds").arg(currentTimeInSeconds));
+
+        // 确保你已经获取并存储了视频的总时长（以秒为单位）
+        if (totalSeconds > 0) {
+            // 计算百分比
+            float progress = (static_cast<float>(currentTimeInSeconds) / totalSeconds) * 100.0f;
+
+            // 发送进度更新信号，传递百分比数据
+            emit progressUpdated(progress);
+            qDebug() << "updateProgress: " << progress << "%";
+        }
     }
 }
