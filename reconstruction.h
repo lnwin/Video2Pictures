@@ -21,6 +21,7 @@ public:
     std::vector<cv::Vec4f> myPushReconstruction(int dir);
     cv::Point3f mypixelToUnitRay(const cv::Point2f& pixel, const cv::Mat& intrinsic);
     float myspeed=0.05;
+    float PZAngle=0;
     cv::Mat intrinsic_linshi;
     cv::Mat intrinsic = (cv::Mat_<double>(3, 3) << 2372.360457159646, 0, 1243.845172805239,
                                      0, 2371.692271094078, 1033.589378054626,

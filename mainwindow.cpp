@@ -114,3 +114,9 @@ void MainWindow::on_speed_textChanged(const QString &arg1)
     myreconstruction->myspeed=arg1.toFloat();
 }
 
+
+void MainWindow::on_PZAngle_textChanged(const QString &arg1)
+{
+    myreconstruction->PZAngle=arg1.toFloat();
+}
+

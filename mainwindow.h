@@ -43,6 +43,8 @@ private slots:
 
     void on_speed_textChanged(const QString &arg1);
 
+    void on_PZAngle_textChanged(const QString &arg1);
+
 private:
     Ui::MainWindow *ui;
     QThread* myProcessThread;

@@ -1,5 +1,6 @@
 #include "reconstruction.h"
 #include <QDateTime>
+
 reconstruction::reconstruction()
 {
 
@@ -100,17 +101,19 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
 
             double s = 1691.32/ denominator;
 
-
+            float angleInRadians =float (PZAngle * 3.14) / 180.0f;
+            float sinValue = std::sin(angleInRadians)*disInter;
+            float cosValue = std::cos(angleInRadians)*disInter;
             if(dir==1)
             {
-                P_A.x()=(s * unit_ray.x)+disInter;
-                P_A.y()=(s * unit_ray.y);
+                P_A.x()=(s * unit_ray.x)+sinValue;
+                P_A.y()=(s * unit_ray.y)+cosValue;
                 P_A.z()=(s * unit_ray.z);
             }
             else if (dir==2)
             {
-                P_A.x()=(s * unit_ray.x);
-                P_A.y()=(s * unit_ray.y)+disInter;
+                P_A.x()=(s * unit_ray.x)+cosValue;
+                P_A.y()=(s * unit_ray.y)+sinValue;
                 P_A.z()=(s * unit_ray.z);
             }
             else if (dir==3)
