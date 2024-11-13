@@ -23,8 +23,8 @@ public:
     float myspeed=0.05;
     float PZAngle=0;
     cv::Mat intrinsic_linshi;
-    cv::Mat intrinsic = (cv::Mat_<double>(3, 3) << 2372.360457159646, 0, 1243.845172805239,
-                                     0, 2371.692271094078, 1033.589378054626,
+    cv::Mat intrinsic = (cv::Mat_<double>(3, 3) << 3203.558782465405, 0, 1235.548825997014,
+                                     0, 3202.812554528705, 1035.272924976913,
                                      0, 0, 1);
     void saveCloud( QString outPutCloudPath);
 public slots:

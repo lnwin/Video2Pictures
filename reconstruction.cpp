@@ -100,7 +100,7 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
         // cv::namedWindow("laserIMG", cv::WINDOW_NORMAL);
         // cv::imshow("laserIMG",laserIMG);
         cv::Vec4f linshiPoint;
-        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG,200);
+        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG,100);
         // std::vector<Eigen::Vector3f>mycloudOnceIMG;
         intrinsic.convertTo(intrinsic_linshi, CV_64F);
         Eigen::Vector3f P_A;
@@ -119,8 +119,8 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
 
             if(dir==1)
             {
-                P_A.x()=(s * unit_ray.x)-sinValue;
-                P_A.y()=(s * unit_ray.y)+cosValue;
+                P_A.x()=(s * unit_ray.x)+disInter;
+                P_A.y()=(s * unit_ray.y);
                 P_A.z()=(s * unit_ray.z);
               //  qDebug()<<" P_A.z()=="<< P_A.z();
             }
@@ -146,7 +146,7 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
             mycloudOnceIMG.push_back(linshiPoint);
 
         }
-        disInter+=myspeed*8.35;
+        disInter+=myspeed*50;
 
       //  qDebug()<<"disInter=="<<disInter;
          float progress = (static_cast<float>(count) / fileList.size()) * 100.0f;
