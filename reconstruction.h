@@ -15,8 +15,8 @@ class reconstruction:public QThread
     Q_OBJECT
 public:
     reconstruction();
-    QString imagePath;
-    QString outPutCloudPath;
+    QString imagePath="C:/Users/40582/Desktop/pushLaser";
+    QString outPutCloudPath="C:/Users/40582/Desktop/pushCloud";
     int mydir=1;
     std::vector<cv::Vec4f> myPushReconstruction(int dir);
     cv::Point3f mypixelToUnitRay(const cv::Point2f& pixel, const cv::Mat& intrinsic);

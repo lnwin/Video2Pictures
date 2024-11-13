@@ -28,11 +28,11 @@ cv::Point3f reconstruction::mypixelToUnitRay(const cv::Point2f& pixel, const cv:
 std::vector<cv::Point> myextractLine(const cv::Mat &img,int threshold)
 {
     cv::Mat dst = img.clone();
-    cv::Mat colordst ;
-  //  qDebug() << "colordst";
+    cv::Mat colordst ;   
     cv::cvtColor(dst, colordst, cv::COLOR_GRAY2BGR);
 
-
+   //  cv::namedWindow("myextractLine", cv::WINDOW_NORMAL);
+    // cv::imshow("myextractLine",dst);
   //  qDebug() << " cv::cvtColor(dst, colordst, cv::COLOR_GRAY2BGR);";
 
     for (int i = 0; i < img.rows; i++) {
@@ -59,7 +59,15 @@ std::vector<cv::Point> myextractLine(const cv::Mat &img,int threshold)
             pixels.push_back(cv::Point(x, i));
         }
     }
+    const bool isClosed = false;
+    // 设置线的颜色和厚度
+    const cv::Scalar lineColor = cv::Scalar(0, 255, 0); // 绿色
+    const int lineThickness = 3;    // 画线
 
+    cv::polylines(colordst, pixels, isClosed, lineColor, lineThickness);
+    cv::namedWindow("test", cv::WINDOW_NORMAL);
+    cv::imshow("test",colordst);
+    cv::waitKey(3);
     return pixels;
 }
 std::vector<cv::Vec4f>mycloudOnceIMG;
@@ -67,7 +75,7 @@ float disInter=0;
 std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
 {
     mycloudOnceIMG.clear();
-    disInter=0;
+
     // 设置支持的图片格式
     QStringList filters;
     filters << "*.png" << "*.jpg" << "*.jpeg" << "*.bmp" << "*.gif";  // 根据需要添加图片格式
@@ -80,35 +88,41 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
     // 获取文件列表
     QFileInfoList fileList = directory.entryInfoList();
     // 循环读取文件
+
+    qDebug()<<"fileList=="<<fileList;
+
     int count=0;
     foreach (QFileInfo fileInfo, fileList)
     {
         QString filePath = fileInfo.absoluteFilePath();
         // 使用 OpenCV 读取图像
         cv::Mat laserIMG = cv::imread(filePath.toLocal8Bit().constData(), cv::IMREAD_GRAYSCALE);
+        // cv::namedWindow("laserIMG", cv::WINDOW_NORMAL);
+        // cv::imshow("laserIMG",laserIMG);
         cv::Vec4f linshiPoint;
-        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG,100);
+        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG,200);
         // std::vector<Eigen::Vector3f>mycloudOnceIMG;
         intrinsic.convertTo(intrinsic_linshi, CV_64F);
         Eigen::Vector3f P_A;
         Eigen::Vector3f finalPoint;
-        // std::cout<<mp.A;
+        float angleInRadians =float (PZAngle * 3.14) / 180.0f;
+        float sinValue = std::sin(angleInRadians)*disInter;
+        float cosValue = std::cos(angleInRadians)*disInter;
         for(int i=0;i<laserPointInPixel.size();i++)
         {
             cv::Point3f unit_ray =mypixelToUnitRay(laserPointInPixel.at(i), intrinsic_linshi);
 
-            double denominator = unit_ray.x *  1.96705+ unit_ray.y *  0.0382633 + unit_ray.z *( 1);
+            double denominator = unit_ray.x *  1.93194+ unit_ray.y * (-0.0175146) + unit_ray.z *( 1);
 
-            double s = 1691.32/ denominator;
+            double s = (-1701.74)/ denominator;
 
-            float angleInRadians =float (PZAngle * 3.14) / 180.0f;
-            float sinValue = std::sin(angleInRadians)*disInter;
-            float cosValue = std::cos(angleInRadians)*disInter;
+
             if(dir==1)
             {
-                P_A.x()=(s * unit_ray.x)+sinValue;
+                P_A.x()=(s * unit_ray.x)-sinValue;
                 P_A.y()=(s * unit_ray.y)+cosValue;
                 P_A.z()=(s * unit_ray.z);
+              //  qDebug()<<" P_A.z()=="<< P_A.z();
             }
             else if (dir==2)
             {
@@ -123,7 +137,6 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
                 P_A.z()=(s * unit_ray.z)+disInter;
             }
 
-
             finalPoint=P_A;
 
             float grayscaleValue = static_cast<float>(laserIMG.at<uchar>(laserPointInPixel.at(i).y, laserPointInPixel.at(i).x));
@@ -132,9 +145,10 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
             //linshiPoint=cv::Point3f(finalPoint[0], finalPoint[1], finalPoint[2]);
             mycloudOnceIMG.push_back(linshiPoint);
 
-
         }
-        disInter+=myspeed*50;
+        disInter+=myspeed*8.35;
+
+      //  qDebug()<<"disInter=="<<disInter;
          float progress = (static_cast<float>(count) / fileList.size()) * 100.0f;
         emit myprogressUpdated(progress);
         count+=1;
