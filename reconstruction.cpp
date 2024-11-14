@@ -1,6 +1,46 @@
 #include "reconstruction.h"
 #include <QDateTime>
+std::vector<cv::Vec4f> reconstruction::interpolateFrames(const std::vector<cv::Vec4f>& frame1, const std::vector<cv::Vec4f>& frame2) {
+    std::vector<cv::Vec4f> interpolatedData;
+    if (frame1.empty() || frame2.empty()) {
+        // 如果其中一个为空，直接跳过插值
+        return interpolatedData;
+    }
 
+    size_t minSize = std::min(frame1.size(), frame2.size());
+
+
+    // 假设 frame1 和 frame2 的大小相同并且点一一对应
+    for (size_t i = 0; i < minSize; ++i) {
+        const cv::Vec4f& point1 = frame1[i];
+        const cv::Vec4f& point2 = frame2[i];
+
+        // 插入点 1：三分之一位置
+        cv::Vec4f interp1(
+            point1[0] + (point2[0] - point1[0]) / 3.0f,  // 插值 X
+            point1[1],                                   // 保持 Y 不变
+            point1[2] + (point2[2] - point1[2]) / 3.0f,  // 插值 Z
+            (point1[3] + point2[3]) / 2.0f               // 灰度值取平均
+            );
+
+        // 插入点 2：三分之二位置
+        cv::Vec4f interp2(
+            point1[0] + 2 * (point2[0] - point1[0]) / 3.0f,  // 插值 X
+            point1[1],                                       // 保持 Y 不变
+            point1[2] + 2 * (point2[2] - point1[2]) / 3.0f,  // 插值 Z
+            (point1[3] + point2[3]) / 2.0f                   // 灰度值取平均
+            );
+
+        // 将原始点和插值点依次加入
+        interpolatedData.push_back(point1);
+        interpolatedData.push_back(interp1);
+        interpolatedData.push_back(interp2);
+    }
+
+    // 最后添加 frame2 的所有点
+   // interpolatedData.insert(interpolatedData.end(), frame2.begin(), frame2.end());
+    return interpolatedData;
+}
 reconstruction::reconstruction()
 {
 
@@ -66,16 +106,22 @@ std::vector<cv::Point> myextractLine(const cv::Mat &img,int threshold)
 
     cv::polylines(colordst, pixels, isClosed, lineColor, lineThickness);
     cv::namedWindow("test", cv::WINDOW_NORMAL);
+    cv::resizeWindow("test", 720, 480);
+    // 计算窗口的位置，使其在屏幕左中间（假设屏幕宽度为1920x1080）
+    int windowX = 0;                 // 屏幕左边
+    int windowY = 30;  // 屏幕高度中间 - 半个窗口高度
+    // 移动窗口到指定位置
+    cv::moveWindow("test", windowX, windowY);
     cv::imshow("test",colordst);
     cv::waitKey(3);
     return pixels;
 }
-std::vector<cv::Vec4f>mycloudOnceIMG;
+std::vector<cv::Vec4f> mycloudResult;
 float disInter=0;
 std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
 {
-    mycloudOnceIMG.clear();
-
+    mycloudResult.clear();
+    std::vector<cv::Vec4f> previousFrameData;
     // 设置支持的图片格式
     QStringList filters;
     filters << "*.png" << "*.jpg" << "*.jpeg" << "*.bmp" << "*.gif";  // 根据需要添加图片格式
@@ -89,74 +135,73 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
     QFileInfoList fileList = directory.entryInfoList();
     // 循环读取文件
 
-    qDebug()<<"fileList=="<<fileList;
-
     int count=0;
-    foreach (QFileInfo fileInfo, fileList)
-    {
+    foreach (QFileInfo fileInfo, fileList) {
         QString filePath = fileInfo.absoluteFilePath();
-        // 使用 OpenCV 读取图像
         cv::Mat laserIMG = cv::imread(filePath.toLocal8Bit().constData(), cv::IMREAD_GRAYSCALE);
-        // cv::namedWindow("laserIMG", cv::WINDOW_NORMAL);
-        // cv::imshow("laserIMG",laserIMG);
-        cv::Vec4f linshiPoint;
-        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG,100);
-        // std::vector<Eigen::Vector3f>mycloudOnceIMG;
+        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 200);
+        std::vector<cv::Vec4f> mycloudOnceIMG;
         intrinsic.convertTo(intrinsic_linshi, CV_64F);
         Eigen::Vector3f P_A;
         Eigen::Vector3f finalPoint;
-        float angleInRadians =float (PZAngle * 3.14) / 180.0f;
-        float sinValue = std::sin(angleInRadians)*disInter;
-        float cosValue = std::cos(angleInRadians)*disInter;
-        for(int i=0;i<laserPointInPixel.size();i++)
-        {
-            cv::Point3f unit_ray =mypixelToUnitRay(laserPointInPixel.at(i), intrinsic_linshi);
 
-            double denominator = unit_ray.x *  1.93194+ unit_ray.y * (-0.0175146) + unit_ray.z *( 1);
+        float angleInRadians = static_cast<float>(PZAngle * 3.14) / 180.0f;
+        float sinValue = std::sin(angleInRadians) * disInter;
+        float cosValue = std::cos(angleInRadians) * disInter;
 
-            double s = (-1701.74)/ denominator;
+        for (int i = 0; i < laserPointInPixel.size(); i++) {
+            cv::Point3f unit_ray = mypixelToUnitRay(laserPointInPixel.at(i), intrinsic_linshi);
+            double denominator = unit_ray.x * 1.93194 + unit_ray.y * (-0.0175146) + unit_ray.z * 1;
+            double s = (-1701.74) / denominator;
 
-
-            if(dir==1)
-            {
-                P_A.x()=(s * unit_ray.x)+disInter;
-                P_A.y()=(s * unit_ray.y);
-                P_A.z()=(s * unit_ray.z);
-              //  qDebug()<<" P_A.z()=="<< P_A.z();
-            }
-            else if (dir==2)
-            {
-                P_A.x()=(s * unit_ray.x)+cosValue;
-                P_A.y()=(s * unit_ray.y)+sinValue;
-                P_A.z()=(s * unit_ray.z);
-            }
-            else if (dir==3)
-            {
-                P_A.x()=(s * unit_ray.x);
-                P_A.y()=(s * unit_ray.y);
-                P_A.z()=(s * unit_ray.z)+disInter;
+            if (dir == 1) {
+                P_A.x() = (s * unit_ray.x) + disInter;
+                P_A.y() = (s * unit_ray.y);
+                P_A.z() = (s * unit_ray.z);
+            } else if (dir == 2) {
+                P_A.x() = (s * unit_ray.x) + cosValue;
+                P_A.y() = (s * unit_ray.y) + sinValue;
+                P_A.z() = (s * unit_ray.z);
+            } else if (dir == 3) {
+                P_A.x() = (s * unit_ray.x);
+                P_A.y() = (s * unit_ray.y);
+                P_A.z() = (s * unit_ray.z) + disInter;
             }
 
-            finalPoint=P_A;
-
+            finalPoint = P_A;
             float grayscaleValue = static_cast<float>(laserIMG.at<uchar>(laserPointInPixel.at(i).y, laserPointInPixel.at(i).x));
-
-            linshiPoint = cv::Vec4f(finalPoint[0], finalPoint[1], finalPoint[2], grayscaleValue);
-            //linshiPoint=cv::Point3f(finalPoint[0], finalPoint[1], finalPoint[2]);
+            cv::Vec4f linshiPoint(finalPoint[0], finalPoint[1], finalPoint[2], grayscaleValue);
             mycloudOnceIMG.push_back(linshiPoint);
-
         }
-        disInter+=myspeed*50;
 
-      //  qDebug()<<"disInter=="<<disInter;
-         float progress = (static_cast<float>(count) / fileList.size()) * 100.0f;
+        if(!useChaZhi)
+        {
+           mycloudResult.insert(mycloudResult.end(), mycloudOnceIMG.begin(), mycloudOnceIMG.end());
+        }
+        else
+        {
+           // 若 previousFrameData 不为空，插入当前帧和前一帧之间的插值点
+           if (!previousFrameData.empty()) {
+                std::vector<cv::Vec4f> interpolatedData = interpolateFrames(previousFrameData, mycloudOnceIMG);
+                // 将插值结果添加到点云数据中（假设 mycloudResult 存储所有点云数据）
+                mycloudResult.insert(mycloudResult.end(), interpolatedData.begin(), interpolatedData.end());
+           }
+
+           // 更新 previousFrameData
+           previousFrameData = mycloudOnceIMG;
+        }
+
+        disInter += myspeed * 50;
+
+        float progress = (static_cast<float>(count) / fileList.size()) * 100.0f;
         emit myprogressUpdated(progress);
-        count+=1;
-
+        count += 1;
     }
+
+
     saveCloud(outPutCloudPath);
 
-    return mycloudOnceIMG;
+    return mycloudResult;
 };
 void reconstruction::saveCloud( QString outPutCloudPath)
 {
@@ -172,7 +217,7 @@ void reconstruction::saveCloud( QString outPutCloudPath)
         QDir *folder = new QDir;
         folder->mkdir(outPutCloudPath+"/"+filedate.currentDateTime().toString("yyyy_MM_dd"));
         cloudfile.open(QIODevice::WriteOnly | QIODevice::Text);
-        for (const auto& point : mycloudOnceIMG)
+        for (const auto& point : mycloudResult)
         {
             stream << QString::number(point[0]) + "," + QString::number(point[1]) + "," + QString::number(point[2]) + "," + QString::number(point[3]) + "\n";
         }
@@ -181,7 +226,7 @@ void reconstruction::saveCloud( QString outPutCloudPath)
     else
     {
         cloudfile.open(QIODevice::WriteOnly | QIODevice::Text|QIODevice::Append);
-        for (const auto& point : mycloudOnceIMG)
+        for (const auto& point : mycloudResult)
         {
             stream << QString::number(point[0]) + "," + QString::number(point[1]) + "," + QString::number(point[2]) + "," + QString::number(point[3]) + "\n";
         }

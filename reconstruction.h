@@ -27,6 +27,8 @@ public:
                                      0, 3202.812554528705, 1035.272924976913,
                                      0, 0, 1);
     void saveCloud( QString outPutCloudPath);
+    bool useChaZhi=false;
+    std::vector<cv::Vec4f> interpolateFrames(const std::vector<cv::Vec4f>& frame1, const std::vector<cv::Vec4f>& frame2);
 public slots:
 
     void start2process();

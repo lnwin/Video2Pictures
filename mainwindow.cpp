@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -118,5 +119,22 @@ void MainWindow::on_speed_textChanged(const QString &arg1)
 void MainWindow::on_PZAngle_textChanged(const QString &arg1)
 {
     myreconstruction->PZAngle=arg1.toFloat();
+}
+
+
+
+
+
+void MainWindow::on_checkBox_stateChanged(int arg1)
+{
+    qDebug()<<arg1;
+    if(arg1==2)
+    {
+        myreconstruction->useChaZhi=true;
+    }
+    else
+    {
+        myreconstruction->useChaZhi=false;
+    }
 }
 
