@@ -15,12 +15,12 @@ class reconstruction:public QThread
     Q_OBJECT
 public:
     reconstruction();
-    QString imagePath="C:/Users/40582/Desktop/pushLaser";
-    QString outPutCloudPath="C:/Users/40582/Desktop/pushCloud";
+    QString imagePath="C:/Users/40582/Desktop/CSRE/PICTUREcUT-11.3-4-29";
+    QString outPutCloudPath="C:/Users/40582/Desktop/CSRE/CLOUD-11.3-4-29";
     int mydir=1;
     std::vector<cv::Vec4f> myPushReconstruction(int dir);
     cv::Point3f mypixelToUnitRay(const cv::Point2f& pixel, const cv::Mat& intrinsic);
-    float myspeed=0.05;
+    float myspeed=0.01;
     float PZAngle=0;
     cv::Mat intrinsic_linshi;
     cv::Mat intrinsic = (cv::Mat_<double>(3, 3) << 3203.558782465405, 0, 1235.548825997014,

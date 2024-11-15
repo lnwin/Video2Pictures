@@ -1,5 +1,13 @@
 #include "reconstruction.h"
 #include <QDateTime>
+void rotatePointAroundZ(float x, float y, float &x_new, float &y_new, float angle) {
+    // 将角度转换为弧度
+    float theta = angle * 3.14 / 180.0;
+
+    // 计算旋转后的坐标
+    x_new = x * std::cos(theta) - y * std::sin(theta);
+    y_new = x * std::sin(theta) + y * std::cos(theta);
+}
 std::vector<cv::Vec4f> reconstruction::interpolateFrames(const std::vector<cv::Vec4f>& frame1, const std::vector<cv::Vec4f>& frame2) {
     std::vector<cv::Vec4f> interpolatedData;
     if (frame1.empty() || frame2.empty()) {
@@ -116,6 +124,26 @@ std::vector<cv::Point> myextractLine(const cv::Mat &img,int threshold)
     cv::waitKey(3);
     return pixels;
 }
+cv::Mat rotateImage(const cv::Mat &src, double angle) {
+    // 获取图像中心
+    cv::Point2f center(src.cols / 2.0, src.rows / 2.0);
+
+    // 计算旋转矩阵
+    cv::Mat rotMat = cv::getRotationMatrix2D(center, angle, 1.0);
+
+    // 计算旋转后图像的边界
+    cv::Rect bbox = cv::RotatedRect(center, src.size(), angle).boundingRect();
+
+    // 调整旋转矩阵，平移中心
+    rotMat.at<double>(0, 2) += bbox.width / 2.0 - center.x;
+    rotMat.at<double>(1, 2) += bbox.height / 2.0 - center.y;
+
+    // 执行仿射变换
+    cv::Mat dst;
+    cv::warpAffine(src, dst, rotMat, bbox.size());
+
+    return dst;
+}
 std::vector<cv::Vec4f> mycloudResult;
 float disInter=0;
 std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
@@ -139,24 +167,25 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
     foreach (QFileInfo fileInfo, fileList) {
         QString filePath = fileInfo.absoluteFilePath();
         cv::Mat laserIMG = cv::imread(filePath.toLocal8Bit().constData(), cv::IMREAD_GRAYSCALE);
+
         std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 200);
         std::vector<cv::Vec4f> mycloudOnceIMG;
         intrinsic.convertTo(intrinsic_linshi, CV_64F);
         Eigen::Vector3f P_A;
         Eigen::Vector3f finalPoint;
 
-        float angleInRadians = static_cast<float>(PZAngle * 3.14) / 180.0f;
+        float angleInRadians = static_cast<float>(45 * 3.14) / 180.0f;
         float sinValue = std::sin(angleInRadians) * disInter;
         float cosValue = std::cos(angleInRadians) * disInter;
 
         for (int i = 0; i < laserPointInPixel.size(); i++) {
             cv::Point3f unit_ray = mypixelToUnitRay(laserPointInPixel.at(i), intrinsic_linshi);
-            double denominator = unit_ray.x * 1.93194 + unit_ray.y * (-0.0175146) + unit_ray.z * 1;
-            double s = (-1701.74) / denominator;
+            double denominator = unit_ray.x *(-9.62883)+ unit_ray.y * (5.76027) + unit_ray.z * 1;
+            double s = (-2810.19) / denominator;
 
             if (dir == 1) {
-                P_A.x() = (s * unit_ray.x) + disInter;
-                P_A.y() = (s * unit_ray.y);
+                P_A.x() = (s * unit_ray.x) +disInter;
+                P_A.y() = (s * unit_ray.y) -1.5*disInter;
                 P_A.z() = (s * unit_ray.z);
             } else if (dir == 2) {
                 P_A.x() = (s * unit_ray.x) + cosValue;
@@ -170,7 +199,13 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
 
             finalPoint = P_A;
             float grayscaleValue = static_cast<float>(laserIMG.at<uchar>(laserPointInPixel.at(i).y, laserPointInPixel.at(i).x));
-            cv::Vec4f linshiPoint(finalPoint[0], finalPoint[1], finalPoint[2], grayscaleValue);
+            // 旋转角度
+            float angle = 30.0;
+            float x_new, y_new;
+
+            // 旋转点
+            rotatePointAroundZ(finalPoint[0],  finalPoint[1], x_new, y_new, angle);
+            cv::Vec4f linshiPoint(x_new, y_new, finalPoint[2], grayscaleValue);
             mycloudOnceIMG.push_back(linshiPoint);
         }
 

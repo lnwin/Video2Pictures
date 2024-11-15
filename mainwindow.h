@@ -48,12 +48,18 @@ private slots:
 
     void on_checkBox_stateChanged(int arg1);
 
+    void on_selectLocalTxt_clicked();
+
+    void on_startGetOut_clicked();
+    void extractData(const QString &inputFilePath, const QString &outputFilePath) ;
 private:
     Ui::MainWindow *ui;
     QThread* myProcessThread;
     myProcess *myprocess;
     QThread *myReconstructionThread;
     reconstruction *myreconstruction;
+    QString LocalDatainputFileName;
+    QString LocalDataoutputFileName;
  signals:
     void start2Cut();
     void startProcess();

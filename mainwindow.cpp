@@ -138,3 +138,56 @@ void MainWindow::on_checkBox_stateChanged(int arg1)
     }
 }
 
+
+void MainWindow::on_selectLocalTxt_clicked()
+{
+    QString fileName = QFileDialog::getOpenFileName(this,QStringLiteral("位置文件选择对话框！"));
+    ui->localTxt->setText(fileName);
+    LocalDatainputFileName=fileName;
+    LocalDataoutputFileName=LocalDatainputFileName.chopped(4)+="_out.txt";
+}
+
+
+void MainWindow::on_startGetOut_clicked()
+{
+    extractData(LocalDatainputFileName,LocalDataoutputFileName);
+}
+void MainWindow::extractData(const QString &inputFilePath, const QString &outputFilePath) {
+    QFile inputFile(inputFilePath);
+    if (!inputFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qDebug() << "无法打开输入文件";
+        return;
+    }
+
+    QFile outputFile(outputFilePath);
+    if (!outputFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qDebug() << "无法打开输出文件";
+        return;
+    }
+
+    QTextStream in(&inputFile);
+    QTextStream out(&outputFile);
+   out << "dateTime" << "," << "qingJiaoYiZongjiao" << "," << "gaoDuJi" <<"," <<"gaoDu"<< "," <<"zongXiangJiao46"<<","<<"gaodu-50" <<"\n";
+    while (!in.atEnd()) {
+        QString line = in.readLine();
+        QStringList dataList = line.split(",");
+
+        // 确保数据量足够
+        if (dataList.size() > 51) {
+            // 获取时间和第29、第51个数据
+            QString dateTime = dataList.at(dataList.size() - 2).trimmed();  // 假设时间在最后
+            QString angle = dataList[12].trimmed();  // 假设时间在最后
+            QString data29 = dataList[23].trimmed();
+            QString angle2 = dataList[28].trimmed();
+            QString data46 = dataList[46].trimmed();
+            QString data50 = dataList[50].trimmed();
+
+
+            // 输出到文件，每行格式：时间, 第29个数据, 第51个数据
+            out << dateTime << "," << angle << "," << data29 <<"," <<angle2<< "," <<data46<<","<<data50 <<"\n";
+        }
+    }
+
+    inputFile.close();
+    outputFile.close();
+}
