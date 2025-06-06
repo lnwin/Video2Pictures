@@ -168,7 +168,7 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
         QString filePath = fileInfo.absoluteFilePath();
         cv::Mat laserIMG = cv::imread(filePath.toLocal8Bit().constData(), cv::IMREAD_GRAYSCALE);
 
-        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 200);
+        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 100);
         std::vector<cv::Vec4f> mycloudOnceIMG;
         intrinsic.convertTo(intrinsic_linshi, CV_64F);
         Eigen::Vector3f P_A;
@@ -180,12 +180,12 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
 
         for (int i = 0; i < laserPointInPixel.size(); i++) {
             cv::Point3f unit_ray = mypixelToUnitRay(laserPointInPixel.at(i), intrinsic_linshi);
-            double denominator = unit_ray.x *(-9.62883)+ unit_ray.y * (5.76027) + unit_ray.z * 1;
-            double s = (-2810.19) / denominator;
+            double denominator = unit_ray.x *(2.26529)+ unit_ray.y * (-0.0208558) + unit_ray.z * 1;
+            double s = (-2155.42) / denominator;
 
             if (dir == 1) {
                 P_A.x() = (s * unit_ray.x) +disInter;
-                P_A.y() = (s * unit_ray.y) -1.5*disInter;
+                P_A.y() = (s * unit_ray.y) ;
                 P_A.z() = (s * unit_ray.z);
             } else if (dir == 2) {
                 P_A.x() = (s * unit_ray.x) + cosValue;
