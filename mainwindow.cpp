@@ -1,6 +1,9 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
-
+struct PsonnavReadOptions {
+    bool verifyChecksum = true;   // 校验 "*HH"；失败行将被跳过
+    bool requireValidFlags = false; // 需要位置/姿态状态为 'A' 才收集
+};
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -191,3 +194,95 @@ void MainWindow::extractData(const QString &inputFilePath, const QString &output
     inputFile.close();
     outputFile.close();
 }
+// 计算 NMEA 异或校验（不含'$'，到'*'前一字节）
+static inline int nmeaXorChecksum(QStringView sv)
+{
+    int cs = 0;
+    for (qsizetype i = 0; i < sv.size(); ++i)
+        cs ^= sv.at(i).toLatin1();   // 协议为 ASCII
+    return cs & 0xFF;
+}
+
+// 从一行中提取 heading（度）。成功返回 true。
+static bool parseHeadingFromPsonnavLine(const QString& line,
+                                        double& headingOut,
+                                        const PsonnavReadOptions& opt)
+{
+    if (!line.startsWith(u"$PSONNAV")) return false;
+
+    // 拆出 “$...*HH” 主体与校验和
+    qsizetype starIdx = line.lastIndexOf(u'*');
+    if (starIdx <= 0) return false; // 无校验部分
+    QStringView body = QStringView{line}.mid(1, starIdx - 1); // 去掉开头的 '$'
+    QStringView csStr = QStringView{line}.mid(starIdx + 1).trimmed();
+    if (csStr.size() >= 2 && opt.verifyChecksum) {
+        bool okHex = false;
+        int want = csStr.left(2).toInt(&okHex, 16);
+        if (!okHex) return false;
+        int got = nmeaXorChecksum(body);
+        if (want != got) return false; // 校验失败
+    }
+
+    // 用 splitRef 避免复制
+    const auto fields = body.split(u',', Qt::KeepEmptyParts);
+    // 按你的设备协议：Heading 在第 14 个字段（0-based index = 14）
+    // 索引对应：
+    // 0:$PSONNAV(已去$)  1:UTC 2:lat 3:N/S 4:lon 5:E/W
+    // 6:major 7:minor 8:ellipse_dir 9:pos_status
+    // 10:depth 11:depth_std 12:roll 13:pitch 14:heading
+    // 15:heading_std 16:orient_status 17:sensor_flags ...
+    if (fields.size() < 15) return false;
+
+    if (opt.requireValidFlags) {
+        // 位置状态 A、姿态状态 A（字段 9 和 16）
+        if (!(fields[9]  == u"A" && fields[16] == u"A"))
+            return false;
+    }
+
+    bool ok = false;
+    double hdg = fields[14].toString().toDouble(&ok);
+    if (!ok) return false;
+
+    // 规范化到 [0,360)
+    if (hdg < 0.0)       hdg += 360.0 * std::ceil((-hdg)/360.0);
+    else if (hdg >= 360) hdg = std::fmod(hdg, 360.0);
+
+    headingOut = hdg;
+    return true;
+}
+
+QVector<double> loadHeadingsFromPsonnavFile(const QString& path,
+                                            const PsonnavReadOptions& opt)
+{
+    QVector<double> headings;
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "Open file failed:" << path;
+        return headings;
+    }
+
+    QTextStream ts(&f);
+    ts.setCodec("UTF-8");
+    headings.reserve(4096); // 预留，按需增长
+
+    QString line;
+    while (ts.readLineInto(&line)) {
+        double hdg;
+        if (parseHeadingFromPsonnavLine(line.trimmed(), hdg, opt))
+            headings.push_back(hdg);
+    }
+    return headings;
+}
+void MainWindow::on_pushButton_clicked()
+{
+    QString fileName = QFileDialog::getOpenFileName(this,QStringLiteral("选择惯导文件!"));
+    PsonnavReadOptions opt;
+    opt.verifyChecksum   = true;   // 建议开启
+    opt.requireValidFlags = false; // 需要时改为 true
+
+    QVector<double> hdgs = loadHeadingsFromPsonnavFile(fileName, opt);
+    qDebug() << "Headings parsed:" << hdgs.size();
+    if (!hdgs.isEmpty())
+        qDebug() << "First..last =" << hdgs.first() << ".." << hdgs.last();
+}
+

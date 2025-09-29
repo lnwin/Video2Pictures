@@ -52,6 +52,8 @@ private slots:
 
     void on_startGetOut_clicked();
     void extractData(const QString &inputFilePath, const QString &outputFilePath) ;
+    void on_pushButton_clicked();
+
 private:
     Ui::MainWindow *ui;
     QThread* myProcessThread;
