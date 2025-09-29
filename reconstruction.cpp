@@ -239,29 +239,57 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
         return mycloudResult;
     }
 
-    // 2) 分段配置：百分比 + Y偏移(mm) + 可选速度覆盖
-    struct YOffsetGroup {
+    // 20 FPS（如有不同，改这里）
+    const double fps     = 20.0;
+    const double frameDt = 1.0 / fps;   // 每帧时长（秒）
+
+    // 若点云内部单位是“米”，把下面设为 0.001；若内部就是“毫米”，保持 1.0
+    constexpr double mm2unit = 1.0;
+
+    // 2) 分段配置：百分比 + Y/Z 偏移(mm) + 可选速度覆盖(米/秒)
+    struct YZOffsetGroup {
         double startFrac;    // 起始百分比 [0,1)
         double endFrac;      // 结束百分比 [0,1)
-        double startVal;     // 起始偏移 (mm)
-        double endVal;       // 结束偏移 (mm)
-        bool   interpolate;  // 是否线性插值
+        double yStartMm;     // 该段 Y 起始偏移 (mm)
+        double yEndMm;       // 该段 Y 结束偏移 (mm)
+        double zStartMm;     // 该段 Z 起始偏移 (mm) —— 新增
+        double zEndMm;       // 该段 Z 结束偏移 (mm) —— 新增
+        bool   interpolate;  // Y/Z 是否线性插值（共用）
         bool   useSpeedOverride; // 是否覆盖速度
-        double speedOverride;    // 覆盖速度（与 myspeed 同单位；若是“单位/毫秒”，则每帧推进 *50）
+        double speedOverride;    // 覆盖速度（单位：米/秒）
     };
 
-    // 你可以随时改这些区间与偏移/速度
-    std::vector<YOffsetGroup> yGroups = {
-                                         //                start  end    yStart   yEnd  是否线性插值  是否覆盖  段落速度
-                                         { /*组1*/         0.00 , 0.15,    0.0 ,    0.0 , false, true, 0.1   },
-                                         { /*组2-1*/       0.15 , 0.31,    0.0 ,   100.0 , true , true , 0.1  },
-                                         { /*组2-2*/       0.31 , 0.50,   20.0,  420.0 , true , true , 0.1   },
-                                         { /*组3*/         0.50 , 0.52,  420.0,  470.0 , true, true, 0.1     },
-                                         { /*组3*/         0.52 , 0.53,  470.0,  500.0 , true, true, 0.1     },
-                                         { /*组3*/         0.53 , 0.54,  500.0,  540.0 , true, true, 0.1     },
-                                         { /*组3*/         0.54 , 0.555,  540.0,  590.0 , true, true, 0.1    },
-                                         { /*组4*/         0.555 , 1.00,  600.0,  540.0 , false, true, 0.1   },
-                                         };
+    // 你给的分段基础上，给 Z 轴默认 0→0（需要时修改数值即可）
+    std::vector<YZOffsetGroup> yGroups = {
+        //                 start   end      y0     y1      z0    z1   lerp   useV   v(m/s)
+        { /*组1*/         0.00 ,  0.10 ,    0.0 ,  0.0 ,   0.0 , 0.0, false,  true,  0.01 },
+        { /*组2-1*/       0.10 ,  0.23 ,    0.0 ,  0.0 ,   0.0 , 0.0, false,  true,  0.10 },
+        { /*组2-2*/       0.23 ,  0.29 ,    0.0 , 10.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.29 ,  0.52 ,   10.0 ,300.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.52 ,  0.555,  300.0 ,370.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.555,  0.557,  370.0 ,370.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.557,  0.56 ,  370.0 ,350.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.56 ,  0.566,  350.0 ,285.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.566,  0.570,  285.0 ,285.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.570,  0.576,  285.0 ,265.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.576,  0.583,  265.0 ,225.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.583,  0.588,  225.0 ,213.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组3*/         0.588,  0.594,  213.0 ,205.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+
+        { /*组3*/         0.594,  0.65 ,  205.0 ,270.0 ,   0.0 , 200.0, true ,  true,  0.10 },
+
+        { /*组4*/         0.65 ,  1.00 ,  900.0 ,540.0 ,   0.0 , 0.0, false,  true,  0.10 }, // 如需 900→540 线性下降，把 false 改 true
+    };
+
+    // //（可选）做个简单的区间合法性检查
+    // for (size_t i = 0; i < yGroups.size(); ++i) {
+    //     if (!(yGroups[i].startFrac < yGroups[i].endFrac)) {
+    //         qWarning() << "Invalid interval at index" << int(i);
+    //     }
+    //     if (i && yGroups[i-1].endFrac > yGroups[i].startFrac) {
+    //         qWarning() << "Intervals overlap around index" << int(i);
+    //     }
+    // }
 
     int count = 0;
 
@@ -269,7 +297,6 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
         const QString filePath = fileInfo.absoluteFilePath();
         cv::Mat laserIMG = cv::imread(filePath.toLocal8Bit().constData(), cv::IMREAD_GRAYSCALE);
         if (laserIMG.empty()) {
-            // 即使本帧空也推进进度条，保持与文件数一致
             float progress = (static_cast<float>(count) / std::max(1, total)) * 100.0f;
             emit myprogressUpdated(progress);
             ++count;
@@ -277,26 +304,32 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
         }
 
         // ——当前进度百分比（0~1）——
-        const double frac = (total > 1) ? static_cast<double>(count) / static_cast<double>(total - 1) : 0.0;
+        const double frac = (total > 1)
+                                ? static_cast<double>(count) / static_cast<double>(total - 1)
+                                : 0.0;
 
-        // ——用分段表得到本帧 yOffset 与本帧速度——
-        double yOffsetMm = 0.0;
-        double speedThisFrame = myspeed;  // 默认用全局 myspeed
+        // ——从分段表得到本帧 Y/Z 偏移 和 速度（m/s）——
+        double yOffsetMm = 0.0, zOffsetMm = 0.0;
+        double speedThisFrame = myspeed;  // 默认全局 m/s
 
         for (const auto& g : yGroups) {
             if (frac >= g.startFrac && frac < g.endFrac) {
                 if (g.interpolate) {
-                    const double a = (frac - g.startFrac) / (g.endFrac - g.startFrac);
-                    yOffsetMm = g.startVal + a * (g.endVal - g.startVal);
+                    const double a = (g.endFrac > g.startFrac)
+                                         ? (frac - g.startFrac) / (g.endFrac - g.startFrac)
+                                         : 0.0;
+                    yOffsetMm = g.yStartMm + a * (g.yEndMm - g.yStartMm);
+                    zOffsetMm = g.zStartMm + a * (g.zEndMm - g.zStartMm);
                 } else {
-                    yOffsetMm = g.endVal;
+                    yOffsetMm = g.yEndMm;
+                    zOffsetMm = g.zEndMm;
                 }
-                if (g.useSpeedOverride) speedThisFrame = g.speedOverride;
+                if (g.useSpeedOverride) speedThisFrame = g.speedOverride; // m/s
                 break;
             }
         }
 
-        // ——生成当前帧点云（你原逻辑）——
+        // ——生成当前帧点云（你的原逻辑）——
         std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 50);
         std::vector<cv::Vec4f> mycloudOnceIMG;
         mycloudOnceIMG.reserve(laserPointInPixel.size());
@@ -317,13 +350,14 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
 
             finalPoint = P_A;
 
-            // ——加 Y 偏移（单位：mm；若内部用米，改为 0.001f * yOffsetMm）——
+            // ——加 Y/Z 偏移（mm→内部单位）
             finalPoint[1] += static_cast<float>(yOffsetMm);
+            finalPoint[2] += static_cast<float>(zOffsetMm);
 
-            float grayscaleValue = static_cast<float>(
+            float gray = static_cast<float>(
                 laserIMG.at<uchar>(laserPointInPixel[i].y, laserPointInPixel[i].x));
 
-            mycloudOnceIMG.emplace_back(finalPoint[0], finalPoint[1], finalPoint[2], grayscaleValue);
+            mycloudOnceIMG.emplace_back(finalPoint[0], finalPoint[1], finalPoint[2], gray);
         }
 
         // ——拼云逻辑（保持）——
@@ -337,19 +371,19 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
             previousFrameData = std::move(mycloudOnceIMG);
         }
 
-        // ——推进位移（保持 50ms/帧 的节奏；单位需与 speedOverride 一致）——
-        disInter += speedThisFrame * 50.0;
+        // ——位移推进：速度(米/秒) × 帧时长(秒) → 米
+        disInter += speedThisFrame * 50;
 
         // ——进度条（保持）——
         float progress = (static_cast<float>(count) / std::max(1, total)) * 100.0f;
         emit myprogressUpdated(progress);
-
         ++count;
     }
 
     saveCloud(outPutCloudPath);
     return mycloudResult;
 }
+
 
 void reconstruction::saveCloud( QString outPutCloudPath)
 {
