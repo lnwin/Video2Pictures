@@ -60,8 +60,8 @@ void MainWindow::on_selectOutputPath_clicked()
     {
         ui->pictureOutPath ->setText(thisDirPath);
     }
-    myprocess->outputPath=thisDirPath;
-    myreconstruction->imagePath=thisDirPath;
+    myprocess->outputPath=ui->pictureOutPath->text();
+    myreconstruction->imagePath=ui->pictureOutPath->text();
 }
 
 
@@ -89,13 +89,18 @@ void MainWindow::on_selectCloudOutPath_clicked()
     {
         ui->cloudOutPath ->setText(thisDirPath);
 
-        myreconstruction->outPutCloudPath=thisDirPath;
+        myreconstruction->outPutCloudPath=ui->cloudOutPath->text();
     }
 }
 
 
 void MainWindow::on_startProcess_clicked()
 {
+    myprocess->outputPath=ui->pictureOutPath->text();
+
+    myreconstruction->imagePath=ui->pictureOutPath->text();
+
+    myreconstruction->outPutCloudPath=ui->cloudOutPath->text();
     emit startProcess();
 }
 

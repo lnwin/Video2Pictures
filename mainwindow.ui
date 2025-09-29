@@ -63,7 +63,7 @@
      <enum>Qt::LeftToRight</enum>
     </property>
     <property name="text">
-     <string>C:/Users/40582/Desktop/冲绳海试报告和数据/剥离的照片-11.3-4-29</string>
+     <string>E:/01-公司相关/02-渊视/12-测试/2025.9.29 中山大学激光雷达测试/2号视频完整图片</string>
     </property>
     <property name="alignment">
      <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
@@ -173,7 +173,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>C:/Users/40582/Desktop/冲绳海试报告和数据/点云数据-11.3-4-29</string>
+     <string>E:/01-公司相关/02-渊视/12-测试/2025.9.29 中山大学激光雷达测试/2号视频完整点云</string>
     </property>
    </widget>
    <widget class="QLabel" name="label_4">
@@ -212,7 +212,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>0.01</string>
+     <string>0.1</string>
     </property>
    </widget>
    <widget class="QLabel" name="label_5">

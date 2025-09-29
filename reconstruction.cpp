@@ -1,12 +1,19 @@
 #include "reconstruction.h"
 #include <QDateTime>
-void rotatePointAroundZ(float x, float y, float &x_new, float &y_new, float angle) {
-    // 将角度转换为弧度
-    float theta = angle * 3.14 / 180.0;
-    // 计算旋转后的坐标
-    x_new = x * std::cos(theta) - y * std::sin(theta);
-    y_new = x * std::sin(theta) + y * std::cos(theta);
-}
+
+// 1) 在函数里/文件顶部定义分段结构（新增速度覆盖）
+struct YOffsetGroup {
+    double startFrac;    // 起始百分比 [0,1)
+    double endFrac;      // 结束百分比 [0,1)
+    double startVal;     // 起始偏移 (mm)
+    double endVal;       // 结束偏移 (mm)
+    bool   interpolate;  // 是否线性插值
+    // —— 新增：速度覆盖（单位与 myspeed 一致；比如 “单位/毫秒”）——
+    bool   useSpeedOverride = false;
+    double speedOverride    = 0.0;   // 若 useSpeedOverride=true，则每帧用它*50推进 disInter
+};
+
+
 std::vector<cv::Vec4f> reconstruction::interpolateFrames(const std::vector<cv::Vec4f>& frame1, const std::vector<cv::Vec4f>& frame2) {
     std::vector<cv::Vec4f> interpolatedData;
     if (frame1.empty() || frame2.empty()) {
@@ -55,7 +62,9 @@ reconstruction::reconstruction()
 
 void reconstruction::start2process()
 {
-    myPushReconstruction(mydir);
+
+    myPushReconstruction(1);
+
 };
 
 cv::Point3f reconstruction::mypixelToUnitRay(const cv::Point2f& pixel, const cv::Mat& intrinsic)
@@ -72,57 +81,7 @@ cv::Point3f reconstruction::mypixelToUnitRay(const cv::Point2f& pixel, const cv:
     return cv::Point3f(point.x / norm, point.y / norm, point.z / norm);
 
 };
-// std::vector<cv::Point> myextractLine(const cv::Mat &img,int threshold)
-// {
-//     cv::Mat dst = img.clone();
-//     cv::Mat colordst ;
-//     cv::cvtColor(dst, colordst, cv::COLOR_GRAY2BGR);
 
-//    //  cv::namedWindow("myextractLine", cv::WINDOW_NORMAL);
-//     // cv::imshow("myextractLine",dst);
-//   //  qDebug() << " cv::cvtColor(dst, colordst, cv::COLOR_GRAY2BGR);";
-
-//     for (int i = 0; i < img.rows; i++) {
-//         for (int j = 0; j < img.cols; j++) {
-//             if (img.at<uchar>(i, j) < threshold) { dst.at<uchar>(i, j) = 0; }
-//             else { dst.at<uchar>(i, j) = img.at<uchar>(i, j); }
-//         }
-//     }
-//     std::vector<cv::Point> pixels;
-
-//     for (int i = 0; i < dst.rows; i++)
-//     {
-//         int sum = 0;
-//         float x = 0;
-//         for (int j = 0; j < dst.cols; j++) {
-//             int g = dst.at<uchar>(i, j);
-//             if (g) {
-//                 sum += g;
-//                 x += g * j;
-//             }
-//         }
-//         if (sum) {
-//             x /= sum;
-//             pixels.push_back(cv::Point(x, i));
-//         }
-//     }
-//     const bool isClosed = false;
-//     // 设置线的颜色和厚度
-//     const cv::Scalar lineColor = cv::Scalar(0, 255, 0); // 绿色
-//     const int lineThickness = 3;    // 画线
-
-//     cv::polylines(colordst, pixels, isClosed, lineColor, lineThickness);
-//     cv::namedWindow("test", cv::WINDOW_NORMAL);
-//     cv::resizeWindow("test", 720, 480);
-//     // 计算窗口的位置，使其在屏幕左中间（假设屏幕宽度为1920x1080）
-//     int windowX = 0;                 // 屏幕左边
-//     int windowY = 30;  // 屏幕高度中间 - 半个窗口高度
-//     // 移动窗口到指定位置
-//     cv::moveWindow("test", windowX, windowY);
-//     cv::imshow("test",colordst);
-//     cv::waitKey(3);
-//     return pixels;
-// }
 std::vector<cv::Point> myextractLine(const cv::Mat &img,int threshold)
 {
     cv::Mat dst = img.clone();
@@ -265,94 +224,133 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
 {
     mycloudResult.clear();
     std::vector<cv::Vec4f> previousFrameData;
-    // 设置支持的图片格式
+
+    // 1) 文件列表
     QStringList filters;
-    filters << "*.png" << "*.jpg" << "*.jpeg" << "*.bmp" << "*.gif";  // 根据需要添加图片格式
-    // 获取目录
+    filters << "*.png" << "*.jpg" << "*.jpeg" << "*.bmp" << "*.gif";
     QDir directory(imagePath);
-    // 按名称或大小排序（这里按名称排序）
     directory.setSorting(QDir::Name);
-    // 过滤出图片文件
     directory.setNameFilters(filters);
-    // 获取文件列表
     QFileInfoList fileList = directory.entryInfoList();
-    // 循环读取文件
 
-    int count=0;
-    foreach (QFileInfo fileInfo, fileList) {
-        QString filePath = fileInfo.absoluteFilePath();
+    const int total = fileList.size();
+    if (total <= 0) {
+        saveCloud(outPutCloudPath);
+        return mycloudResult;
+    }
+
+    // 2) 分段配置：百分比 + Y偏移(mm) + 可选速度覆盖
+    struct YOffsetGroup {
+        double startFrac;    // 起始百分比 [0,1)
+        double endFrac;      // 结束百分比 [0,1)
+        double startVal;     // 起始偏移 (mm)
+        double endVal;       // 结束偏移 (mm)
+        bool   interpolate;  // 是否线性插值
+        bool   useSpeedOverride; // 是否覆盖速度
+        double speedOverride;    // 覆盖速度（与 myspeed 同单位；若是“单位/毫秒”，则每帧推进 *50）
+    };
+
+    // 你可以随时改这些区间与偏移/速度
+    std::vector<YOffsetGroup> yGroups = {
+                                         //                start  end    yStart   yEnd  是否线性插值  是否覆盖  段落速度
+                                         { /*组1*/         0.00 , 0.18,    0.0 ,    0.0 , false, true, 0.1   },
+                                         { /*组2-1*/       0.18 , 0.31,    0.0 ,   50.0 , true , true , 0.1 },
+                                         { /*组2-2*/       0.31 , 0.50,   20.0,  420.0 , true , true , 0.1 },
+                                         { /*组3*/         0.50 , 0.52,  420.0,  470.0 , true, true, 0.1    },
+                                         { /*组3*/         0.52 , 0.53,  470.0,  500.0 , true, true, 0.1    },
+                                         { /*组3*/         0.53 , 0.54,  500.0,  540.0 , true, true, 0.1    },
+                                         { /*组3*/         0.54 , 0.555,  540.0,  590.0 , true, true, 0.1    },
+                                         { /*组4*/         0.555 , 1.00,  600.0,  540.0 , false, true, 0.1   },
+                                         };
+
+    int count = 0;
+
+    foreach (const QFileInfo& fileInfo, fileList) {
+        const QString filePath = fileInfo.absoluteFilePath();
         cv::Mat laserIMG = cv::imread(filePath.toLocal8Bit().constData(), cv::IMREAD_GRAYSCALE);
+        if (laserIMG.empty()) {
+            // 即使本帧空也推进进度条，保持与文件数一致
+            float progress = (static_cast<float>(count) / std::max(1, total)) * 100.0f;
+            emit myprogressUpdated(progress);
+            ++count;
+            continue;
+        }
 
+        // ——当前进度百分比（0~1）——
+        const double frac = (total > 1) ? static_cast<double>(count) / static_cast<double>(total - 1) : 0.0;
+
+        // ——用分段表得到本帧 yOffset 与本帧速度——
+        double yOffsetMm = 0.0;
+        double speedThisFrame = myspeed;  // 默认用全局 myspeed
+
+        for (const auto& g : yGroups) {
+            if (frac >= g.startFrac && frac < g.endFrac) {
+                if (g.interpolate) {
+                    const double a = (frac - g.startFrac) / (g.endFrac - g.startFrac);
+                    yOffsetMm = g.startVal + a * (g.endVal - g.startVal);
+                } else {
+                    yOffsetMm = g.endVal;
+                }
+                if (g.useSpeedOverride) speedThisFrame = g.speedOverride;
+                break;
+            }
+        }
+
+        // ——生成当前帧点云（你原逻辑）——
         std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 50);
         std::vector<cv::Vec4f> mycloudOnceIMG;
+        mycloudOnceIMG.reserve(laserPointInPixel.size());
+
         intrinsic.convertTo(intrinsic_linshi, CV_64F);
         Eigen::Vector3f P_A;
         Eigen::Vector3f finalPoint;
 
-        float angleInRadians = static_cast<float>(45 * 3.14) / 180.0f;
-        float sinValue = std::sin(angleInRadians) * disInter;
-        float cosValue = std::cos(angleInRadians) * disInter;
-
-        for (int i = 0; i < laserPointInPixel.size(); i++) {
-            cv::Point3f unit_ray = mypixelToUnitRay(laserPointInPixel.at(i), intrinsic_linshi);
-            double denominator = unit_ray.x *(2.36015)+ unit_ray.y * (-0.0117948) + unit_ray.z * 1;
+        for (int i = 0; i < static_cast<int>(laserPointInPixel.size()); ++i) {
+            cv::Point3f unit_ray = mypixelToUnitRay(laserPointInPixel[i], intrinsic_linshi);
+            double denominator = unit_ray.x * (2.36015) + unit_ray.y * (-0.0117948) + unit_ray.z * 1;
             double s = (-901.984) / denominator;
 
-            if (dir == 1) {
-                P_A.x() = (s * unit_ray.x) +disInter;
-                P_A.y() = (s * unit_ray.y) ;
-                P_A.z() = (s * unit_ray.z);
-            } else if (dir == 2) {
-                P_A.x() = (s * unit_ray.x) + cosValue;
-                P_A.y() = (s * unit_ray.y) + sinValue;
-                P_A.z() = (s * unit_ray.z);
-            } else if (dir == 3) {
-                P_A.x() = (s * unit_ray.x);
-                P_A.y() = (s * unit_ray.y);
-                P_A.z() = (s * unit_ray.z) + disInter;
-            }
+            // 沿 X 推扫（保持）
+            P_A.x() = (s * unit_ray.x) + disInter;
+            P_A.y() = (s * unit_ray.y);
+            P_A.z() = (s * unit_ray.z);
 
             finalPoint = P_A;
-            float grayscaleValue = static_cast<float>(laserIMG.at<uchar>(laserPointInPixel.at(i).y, laserPointInPixel.at(i).x));
-            // 旋转角度
-            float angle = 30.0;
-            float x_new, y_new;
 
-            // 旋转点
-            rotatePointAroundZ(finalPoint[0],  finalPoint[1], x_new, y_new, angle);
-            cv::Vec4f linshiPoint(x_new, y_new, finalPoint[2], grayscaleValue);
-            mycloudOnceIMG.push_back(linshiPoint);
+            // ——加 Y 偏移（单位：mm；若内部用米，改为 0.001f * yOffsetMm）——
+            finalPoint[1] += static_cast<float>(yOffsetMm);
+
+            float grayscaleValue = static_cast<float>(
+                laserIMG.at<uchar>(laserPointInPixel[i].y, laserPointInPixel[i].x));
+
+            mycloudOnceIMG.emplace_back(finalPoint[0], finalPoint[1], finalPoint[2], grayscaleValue);
         }
 
-        if(!useChaZhi)
-        {
-           mycloudResult.insert(mycloudResult.end(), mycloudOnceIMG.begin(), mycloudOnceIMG.end());
-        }
-        else
-        {
-           // 若 previousFrameData 不为空，插入当前帧和前一帧之间的插值点
-           if (!previousFrameData.empty()) {
-                std::vector<cv::Vec4f> interpolatedData = interpolateFrames(previousFrameData, mycloudOnceIMG);
-                // 将插值结果添加到点云数据中（假设 mycloudResult 存储所有点云数据）
+        // ——拼云逻辑（保持）——
+        if (!useChaZhi) {
+            mycloudResult.insert(mycloudResult.end(), mycloudOnceIMG.begin(), mycloudOnceIMG.end());
+        } else {
+            if (!previousFrameData.empty()) {
+                auto interpolatedData = interpolateFrames(previousFrameData, mycloudOnceIMG);
                 mycloudResult.insert(mycloudResult.end(), interpolatedData.begin(), interpolatedData.end());
-           }
-
-           // 更新 previousFrameData
-           previousFrameData = mycloudOnceIMG;
+            }
+            previousFrameData = std::move(mycloudOnceIMG);
         }
 
-        disInter += myspeed * 50;
+        // ——推进位移（保持 50ms/帧 的节奏；单位需与 speedOverride 一致）——
+        disInter += speedThisFrame * 50.0;
 
-        float progress = (static_cast<float>(count) / fileList.size()) * 100.0f;
+        // ——进度条（保持）——
+        float progress = (static_cast<float>(count) / std::max(1, total)) * 100.0f;
         emit myprogressUpdated(progress);
-        count += 1;
+
+        ++count;
     }
 
-
     saveCloud(outPutCloudPath);
-
     return mycloudResult;
-};
+}
+
 void reconstruction::saveCloud( QString outPutCloudPath)
 {
     QDateTime filedate;
@@ -385,4 +383,12 @@ void reconstruction::saveCloud( QString outPutCloudPath)
     cloudfile.close();
 
     emit  sendmySG2Main("saved Cloud success");
+};
+
+// 20FPS，使用“相对偏航（减首样本）”
+
+
+void reconstruction::getGD2Process(QVector<double> hdgs )
+{
+    myhdgs=hdgs;
 };

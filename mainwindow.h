@@ -65,5 +65,6 @@ private:
  signals:
     void start2Cut();
     void startProcess();
+    void sendGD2Process(QVector<double> hdgs );
 };
 #endif // MAINWINDOW_H
