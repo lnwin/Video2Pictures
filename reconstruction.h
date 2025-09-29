@@ -23,8 +23,8 @@ public:
     float myspeed=0.01;
     float PZAngle=0;
     cv::Mat intrinsic_linshi;
-    cv::Mat intrinsic = (cv::Mat_<double>(3, 3) << 2371.273483243321, 0, 1050.348010500364,
-                                     0, 2370.532616244673,  745.8844297057866,
+    cv::Mat intrinsic = (cv::Mat_<double>(3, 3) << 2579.454124121254, 0, 1300.363638421887,
+                                     0, 2577.912309294391,  1027.11205883085,
                                      0, 0, 1);
     void saveCloud( QString outPutCloudPath);
     bool useChaZhi=false;

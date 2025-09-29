@@ -3,7 +3,6 @@
 void rotatePointAroundZ(float x, float y, float &x_new, float &y_new, float angle) {
     // 将角度转换为弧度
     float theta = angle * 3.14 / 180.0;
-
     // 计算旋转后的坐标
     x_new = x * std::cos(theta) - y * std::sin(theta);
     y_new = x * std::sin(theta) + y * std::cos(theta);
@@ -73,38 +72,152 @@ cv::Point3f reconstruction::mypixelToUnitRay(const cv::Point2f& pixel, const cv:
     return cv::Point3f(point.x / norm, point.y / norm, point.z / norm);
 
 };
+// std::vector<cv::Point> myextractLine(const cv::Mat &img,int threshold)
+// {
+//     cv::Mat dst = img.clone();
+//     cv::Mat colordst ;
+//     cv::cvtColor(dst, colordst, cv::COLOR_GRAY2BGR);
+
+//    //  cv::namedWindow("myextractLine", cv::WINDOW_NORMAL);
+//     // cv::imshow("myextractLine",dst);
+//   //  qDebug() << " cv::cvtColor(dst, colordst, cv::COLOR_GRAY2BGR);";
+
+//     for (int i = 0; i < img.rows; i++) {
+//         for (int j = 0; j < img.cols; j++) {
+//             if (img.at<uchar>(i, j) < threshold) { dst.at<uchar>(i, j) = 0; }
+//             else { dst.at<uchar>(i, j) = img.at<uchar>(i, j); }
+//         }
+//     }
+//     std::vector<cv::Point> pixels;
+
+//     for (int i = 0; i < dst.rows; i++)
+//     {
+//         int sum = 0;
+//         float x = 0;
+//         for (int j = 0; j < dst.cols; j++) {
+//             int g = dst.at<uchar>(i, j);
+//             if (g) {
+//                 sum += g;
+//                 x += g * j;
+//             }
+//         }
+//         if (sum) {
+//             x /= sum;
+//             pixels.push_back(cv::Point(x, i));
+//         }
+//     }
+//     const bool isClosed = false;
+//     // 设置线的颜色和厚度
+//     const cv::Scalar lineColor = cv::Scalar(0, 255, 0); // 绿色
+//     const int lineThickness = 3;    // 画线
+
+//     cv::polylines(colordst, pixels, isClosed, lineColor, lineThickness);
+//     cv::namedWindow("test", cv::WINDOW_NORMAL);
+//     cv::resizeWindow("test", 720, 480);
+//     // 计算窗口的位置，使其在屏幕左中间（假设屏幕宽度为1920x1080）
+//     int windowX = 0;                 // 屏幕左边
+//     int windowY = 30;  // 屏幕高度中间 - 半个窗口高度
+//     // 移动窗口到指定位置
+//     cv::moveWindow("test", windowX, windowY);
+//     cv::imshow("test",colordst);
+//     cv::waitKey(3);
+//     return pixels;
+// }
 std::vector<cv::Point> myextractLine(const cv::Mat &img,int threshold)
 {
     cv::Mat dst = img.clone();
-    cv::Mat colordst ;   
-    cv::cvtColor(dst, colordst, cv::COLOR_GRAY2BGR);
+    int windowRows=30;int windColes=30;
+    if (img.empty()) {
+        std::cerr << "Error: Empty image in extractLaserLine()" << std::endl;
+        return {};
+    }
 
-   //  cv::namedWindow("myextractLine", cv::WINDOW_NORMAL);
-    // cv::imshow("myextractLine",dst);
-  //  qDebug() << " cv::cvtColor(dst, colordst, cv::COLOR_GRAY2BGR);";
+    cv::Mat colordst;
+    cv::cvtColor(img, colordst, cv::COLOR_GRAY2BGR);
 
-    for (int i = 0; i < img.rows; i++) {
-        for (int j = 0; j < img.cols; j++) {
-            if (img.at<uchar>(i, j) < threshold) { dst.at<uchar>(i, j) = 0; }
-            else { dst.at<uchar>(i, j) = img.at<uchar>(i, j); }
+    int constwindowRows = windowRows;
+    int width = img.cols;
+    int height = img.rows;
+    int ColsBoxNumber = ((2 * (width - windColes)) / windColes) + 1;
+    int ColsStepNumber = windColes/2;
+
+    int rowsNumber = (height + windowRows - 1) / windowRows; // 确保计算最后一行
+
+    std::vector<cv::Point> pixels;
+    pixels.reserve(height);
+
+    std::vector<std::array<float, 4>> allbox;
+    allbox.reserve(rowsNumber * ColsBoxNumber);
+
+    // ================== 遍历窗口 ==================
+    for (int i = 0; i < height; i += windowRows)
+    {
+        int currentWindowRows = std::min(windowRows, height - i); // 确保最后一行 box 不会超界
+
+        for (int k = 0; k < ColsBoxNumber; k++) {
+            int currentBoxSumValue = 0;
+            int overThresholdTime = 0;
+            int box_startX = k * ColsStepNumber;
+            int box_endX = std::min(k * ColsStepNumber + windColes, width);
+
+            cv::Rect boxRect(box_startX, i, box_endX - box_startX, currentWindowRows);
+            cv::Mat box = img(boxRect);
+
+            for (int y = 0; y < box.rows; ++y) {
+                const uchar* rowPtr = box.ptr<uchar>(y);
+                for (int x = 0; x < box.cols; ++x) {
+                    uchar pixelValue = rowPtr[x];
+                    currentBoxSumValue += pixelValue;
+                    if (pixelValue >= threshold) overThresholdTime++;
+                }
+            }
+
+            float BoxScore = currentBoxSumValue * 0.1f + overThresholdTime * 200;
+            allbox.push_back({BoxScore, (float)box_startX, (float)box_endX, (float)overThresholdTime});
         }
     }
-    std::vector<cv::Point> pixels;
 
-    for (int i = 0; i < dst.rows; i++)
-    {
-        int sum = 0;
-        float x = 0;
-        for (int j = 0; j < dst.cols; j++) {
-            int g = dst.at<uchar>(i, j);
-            if (g) {
-                sum += g;
-                x += g * j;
+    std::vector<std::array<float, 4>> targetBoxes(rowsNumber);
+    // ================== 查找每一行得分最高的 Box ==================
+    for (int boxi = 0; boxi < rowsNumber; ++boxi) {
+        float maxScore = 0;
+        std::array<float, 4> bestBox;
+        for (int boxN = boxi * ColsBoxNumber; boxN < boxi * ColsBoxNumber + ColsBoxNumber; ++boxN) {
+            if (allbox[boxN][0] > maxScore) {
+                maxScore = allbox[boxN][0];
+                bestBox = allbox[boxN];
             }
         }
-        if (sum) {
-            x /= sum;
-            pixels.push_back(cv::Point(x, i));
+        targetBoxes[boxi] = bestBox;
+    }
+
+    // ================== 计算灰度重心 ==================
+    for (size_t s = 0; s < targetBoxes.size(); ++s) {
+        if (targetBoxes[s].at(3) > 0) {
+            int startY = static_cast<int>(s * constwindowRows);
+            int endY = std::min(startY + constwindowRows, height); // 修正 endY 确保最后 box 计算
+
+            int leftBand = std::max(static_cast<int>(targetBoxes[s][1]) - 10, 0);
+            int rightBand = std::min(static_cast<int>(targetBoxes[s][2]) + 10, width);
+
+            for (int i = startY; i < endY; i++) {
+                int sum = 0;
+                float weighted_sum_x = 0;
+                const uchar* rowPtr = img.ptr<uchar>(i);
+
+                for (int j = leftBand; j < rightBand; j++) {
+                    int g = rowPtr[j];
+                    if (g >= threshold) {
+                        sum += g;
+                        weighted_sum_x += g * j;
+                    }
+                }
+
+                if (sum > 0) {
+                    float x = weighted_sum_x / sum;
+                    pixels.push_back(cv::Point(static_cast<int>(x), i));
+                }
+            }
         }
     }
     const bool isClosed = false;
@@ -124,6 +237,8 @@ std::vector<cv::Point> myextractLine(const cv::Mat &img,int threshold)
     cv::waitKey(3);
     return pixels;
 }
+
+
 cv::Mat rotateImage(const cv::Mat &src, double angle) {
     // 获取图像中心
     cv::Point2f center(src.cols / 2.0, src.rows / 2.0);
@@ -168,7 +283,7 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
         QString filePath = fileInfo.absoluteFilePath();
         cv::Mat laserIMG = cv::imread(filePath.toLocal8Bit().constData(), cv::IMREAD_GRAYSCALE);
 
-        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 100);
+        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 50);
         std::vector<cv::Vec4f> mycloudOnceIMG;
         intrinsic.convertTo(intrinsic_linshi, CV_64F);
         Eigen::Vector3f P_A;
@@ -180,8 +295,8 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
 
         for (int i = 0; i < laserPointInPixel.size(); i++) {
             cv::Point3f unit_ray = mypixelToUnitRay(laserPointInPixel.at(i), intrinsic_linshi);
-            double denominator = unit_ray.x *(2.26529)+ unit_ray.y * (-0.0208558) + unit_ray.z * 1;
-            double s = (-2155.42) / denominator;
+            double denominator = unit_ray.x *(2.36015)+ unit_ray.y * (-0.0117948) + unit_ray.z * 1;
+            double s = (-901.984) / denominator;
 
             if (dir == 1) {
                 P_A.x() = (s * unit_ray.x) +disInter;
