@@ -15,7 +15,17 @@ namespace Ui {
 class MainWindow;
 }
 QT_END_NAMESPACE
-
+struct YZOffsetGroup {
+    double startFrac;      // [0,1)
+    double endFrac;        // [0,1)
+    double yStartMm;       // 该段 Y 起点偏移(mm)
+    double yEndMm;         // 该段 Y 终点偏移(mm)
+    double zStartMm;       // 该段 Z 起点偏移(mm)
+    double zEndMm;         // 该段 Z 终点偏移(mm)
+    bool   interpolate;    // Y/Z 是否线性插值
+    bool   useSpeedOverride; // 是否覆盖速度
+    double speedOverride;    // 覆盖速度 (m/s)
+};
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -59,6 +69,8 @@ private slots:
 
     void on_findPoint_clicked();
 
+    void on_pushButton_2_clicked();
+
 private:
     Ui::MainWindow *ui;
     QThread* myProcessThread;
@@ -73,6 +85,12 @@ private:
     double getCloudPointPosition(const QString& filePath,
                                         const QVector3D& target,
                                         float eps = 1e-4f) ;  //
+    bool processCloudWithYZGroups(const QString& inPath,
+                                              const QString& outPath,
+                                              const std::vector<YZOffsetGroup>& groups,
+                                              bool applyXShift,
+                                              double fps,
+                                  double defaultSpeedMps);
 
  signals:
     void start2Cut();

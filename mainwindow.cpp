@@ -6,6 +6,78 @@ struct PsonnavReadOptions {
     bool requireValidFlags = false; // 需要位置/姿态状态为 'A' 才收集
 };
 
+// 解析一行 x,y,z[,其他]；返回是否成功；自动兼容逗号/空白；输出 tokens 与分隔类型
+static bool parseXYZLine(const QString& line,
+                         float& x, float& y, float& z,
+                         QStringList& tokensOut,
+                         QChar& delimOut)
+{
+    QString s = line.trimmed();
+    if (s.isEmpty()) return false;
+
+    QStringList parts;
+    QChar delim = s.contains(',') ? QChar(',') : QChar(' ');
+
+    if (delim == QChar(',')) {
+        parts = s.split(',', Qt::SkipEmptyParts);
+    } else {
+        parts = s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+    }
+    if (parts.size() < 3) return false;
+
+    bool okx=false, oky=false, okz=false;
+    float xx = parts[0].toFloat(&okx);
+    float yy = parts[1].toFloat(&oky);
+    float zz = parts[2].toFloat(&okz);
+    if (!(okx && oky && okz)) return false;
+
+    x = xx; y = yy; z = zz;
+    tokensOut = parts;
+    delimOut  = delim;
+    return true;
+}
+
+// 把 x,y,z + 其余列重新拼回一行；尽量保留原来的分隔风格
+static QString rebuildLine(float x, float y, float z,
+                           const QStringList& originalTokens,
+                           QChar delim)
+{
+    QStringList out;
+    out.reserve(originalTokens.size());
+    out << QString::number(x, 'f', 6)
+        << QString::number(y, 'f', 6)
+        << QString::number(z, 'f', 6);
+    for (int i = 3; i < originalTokens.size(); ++i) out << originalTokens[i];
+
+    if (delim == QChar(',')) return out.join(',');
+    return out.join(' ');
+}
+
+// 给定进度 frac∈[0,1]，从分段表取当帧的 (yMm, zMm, speedMps)
+static void sampleYZandSpeed(double frac,
+                             const std::vector<YZOffsetGroup>& groups,
+                             double& yMm, double& zMm, double& speedMps,
+                             double defaultSpeedMps)
+{
+    yMm = 0.0; zMm = 0.0; speedMps = defaultSpeedMps;
+    for (const auto& g : groups) {
+        if (frac >= g.startFrac && frac < g.endFrac) {
+            if (g.interpolate) {
+                const double a = (g.endFrac > g.startFrac)
+                                     ? (frac - g.startFrac) / (g.endFrac - g.startFrac)
+                                     : 0.0;
+                yMm = g.yStartMm + a * (g.yEndMm - g.yStartMm);
+                zMm = g.zStartMm + a * (g.zEndMm - g.zStartMm);
+            } else {
+                yMm = g.yEndMm;
+                zMm = g.zEndMm;
+            }
+            if (g.useSpeedOverride) speedMps = g.speedOverride;
+            break;
+        }
+    }
+}
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -374,4 +446,136 @@ double MainWindow::getCloudPointPosition(const QString& filePath,const QVector3D
 
     if (index < 0 || lineId <= 1) return -1.0;
     return double(index) / double(lineId - 1);  // 转换为 0~1 的相对位置
+}
+
+void MainWindow::on_pushButton_2_clicked()
+{
+    // 选择输出
+    QString out = QFileDialog::getSaveFileName(this, QStringLiteral("保存处理后点云"),
+                                               QFileInfo(ui->targetCloudFilePath->text()).absolutePath() + "/cloud_processed.txt",
+                                               "Text (*.txt);;All (*.*)");
+    if (out.isEmpty()) return;
+
+    std::vector<YZOffsetGroup> groups = {
+                                         //             start end    y0   y1    z0   z1   lerp useV  v(m/s)
+                                         { /*全段*/     0.00, 1.00,  0.0, 0.0,  0.0, 0.0, false,false, 0.10 },
+                                         };
+
+    // 想做“沿 Z 逐步抬高 0→200mm，Y 不变；保持速度覆盖 0.10 m/s（若不开 X 推进可无视）”
+    // groups = {
+    //   {0.00, 1.00, 0.0, 0.0, 0.0, 200.0, true, true, 0.10},
+    // };
+
+    // 是否对 X 也做“按速度推进”的位移（默认 false）
+    bool applyXShift = false;   // 若想启用，改 true
+    double fps = 20.0;          // 帧率仅用于 X 推进：m/s -> mm/点
+    double defaultSpeedMps = 0.10;
+
+    bool ok = processCloudWithYZGroups(ui->targetCloudFilePath->text(),
+                                       out, groups,
+                                       applyXShift, fps, defaultSpeedMps);
+    if (ok) {
+        QMessageBox mb(this);
+        mb.setWindowTitle("完成");
+        mb.setText("已输出处理后点云：\n" + out);
+        mb.setIcon(QMessageBox::Information);
+        mb.setWindowFlag(Qt::WindowStaysOnTopHint, true);
+        mb.exec();
+    } else {
+        QMessageBox::warning(this, "失败", "处理失败，请检查输入文件格式。");
+    }
+}
+
+// ====== 主处理：把原始点云 -> 应用分段 Y/Z 偏移(+可选X推进) -> 写出 ======
+bool MainWindow::processCloudWithYZGroups(const QString& inPath,
+                                          const QString& outPath,
+                                          const std::vector<YZOffsetGroup>& groups,
+                                          bool applyXShift,
+                                          double fps,
+                                          double defaultSpeedMps)
+{
+    QFile fin(inPath);
+    if (!fin.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "错误", "无法打开输入点云文件");
+        return false;
+    }
+    QTextStream tin(&fin);
+    tin.setCodec("UTF-8");
+
+    // 预读统计有效点数（两遍读取最稳妥）
+    int validCount = 0;
+    {
+        QString line;
+        while (tin.readLineInto(&line)) {
+            float x,y,z; QStringList toks; QChar delim;
+            if (parseXYZLine(line, x,y,z, toks, delim)) ++validCount;
+        }
+        fin.close();
+    }
+    if (validCount <= 0) {
+        QMessageBox::information(this, "提示", "文件中未解析到有效点");
+        return false;
+    }
+
+    // 重新打开输入，打开输出
+    if (!fin.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "错误", "重新打开输入失败");
+        return false;
+    }
+    QFile fout(outPath);
+    if (!fout.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "错误", "无法创建输出点云文件");
+        return false;
+    }
+    QTextStream tout(&fout);
+    tout.setCodec("UTF-8");
+
+    // 单位：速度是 m/s；点云是 mm；每“点”为一条记录
+    // 若把“每条记录当作一帧”，则每“帧”时长：
+    const double frameDt = 1.0 / std::max(1.0, fps);   // s
+    const double MPS_TO_MM_PER_POINT = 1000.0 * frameDt; // m/s -> mm/点
+    double disInterMm = 0.0; // 可选：沿 X 的累计推进(毫米)
+
+    // 第二遍：读取、计算、输出
+    QString line;
+    int idx = 0;
+    int processed = 0;
+    while (tin.readLineInto(&line)) {
+        float x,y,z; QStringList toks; QChar delim;
+        if (!parseXYZLine(line, x,y,z, toks, delim)) {
+            // 非点数据（或注释）原样写回
+            tout << line << '\n';
+            continue;
+        }
+
+        // 计算该点在整体中的进度 frac
+        const double frac = (validCount > 1) ? double(idx) / double(validCount - 1) : 0.0;
+
+        // 取该进度下的 Y/Z 偏移与速度
+        double yMm=0.0, zMm=0.0, speedMps=defaultSpeedMps;
+        sampleYZandSpeed(frac, groups, yMm, zMm, speedMps, defaultSpeedMps);
+
+        // 应用偏移（你的点云就是毫米单位，直接相加）
+        x += (applyXShift ? static_cast<float>(disInterMm) : 0.0f);
+        y += static_cast<float>(yMm);
+        z += static_cast<float>(zMm);
+
+        // 写出（保留其他列）
+        tout << rebuildLine(x,y,z, toks, delim) << '\n';
+
+        // 更新推进：下一点前进量（若开启 X 推进）
+        if (applyXShift) {
+            disInterMm += speedMps * MPS_TO_MM_PER_POINT; // mm 累计
+        }
+
+        ++idx;
+        ++processed;
+        if ((processed % 200000) == 0) {
+            qApp->processEvents(); // 大文件时避免界面卡死
+        }
+    }
+
+    fin.close();
+    fout.close();
+    return true;
 }

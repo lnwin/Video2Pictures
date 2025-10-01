@@ -1,4 +1,4 @@
-#include "reconstruction.h"
+﻿#include "reconstruction.h"
 #include <QDateTime>
 
 // 1) 在函数里/文件顶部定义分段结构（新增速度覆盖）
@@ -262,34 +262,9 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
     // 你给的分段基础上，给 Z 轴默认 0→0（需要时修改数值即可）
     std::vector<YZOffsetGroup> yGroups = {
         //                 start   end      y0     y1      z0    z1   lerp   useV   v(m/s)
-        { /*组1*/         0.00 ,  0.10 ,    0.0 ,  0.0 ,   0.0 , 0.0, false,  true,  0.01 },
-        { /*组2-1*/       0.10 ,  0.23 ,    0.0 ,  0.0 ,   0.0 , 0.0, false,  true,  0.10 },
-        { /*组2-2*/       0.23 ,  0.29 ,    0.0 , 10.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.29 ,  0.52 ,   10.0 ,300.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.52 ,  0.555,  300.0 ,370.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.555,  0.557,  370.0 ,370.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.557,  0.56 ,  370.0 ,350.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.56 ,  0.566,  350.0 ,285.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.566,  0.570,  285.0 ,285.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.570,  0.576,  285.0 ,265.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.576,  0.583,  265.0 ,225.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.583,  0.588,  225.0 ,213.0 ,   0.0 , 0.0, true ,  true,  0.10 },
-        { /*组3*/         0.588,  0.594,  213.0 ,205.0 ,   0.0 , 0.0, true ,  true,  0.10 },
+        { /*组1*/         0.00 ,  1.00 ,    0.0 ,  0.0 ,   0.0 , 0.0, false,  false,  0.1 },
 
-        { /*组3*/         0.594,  0.65 ,  205.0 ,270.0 ,   0.0 , 200.0, true ,  true,  0.10 },
-
-        { /*组4*/         0.65 ,  1.00 ,  900.0 ,540.0 ,   0.0 , 0.0, false,  true,  0.10 }, // 如需 900→540 线性下降，把 false 改 true
     };
-
-    // //（可选）做个简单的区间合法性检查
-    // for (size_t i = 0; i < yGroups.size(); ++i) {
-    //     if (!(yGroups[i].startFrac < yGroups[i].endFrac)) {
-    //         qWarning() << "Invalid interval at index" << int(i);
-    //     }
-    //     if (i && yGroups[i-1].endFrac > yGroups[i].startFrac) {
-    //         qWarning() << "Intervals overlap around index" << int(i);
-    //     }
-    // }
 
     int count = 0;
 
