@@ -469,61 +469,15 @@
       </rect>
      </property>
      <property name="text">
-      <string>目标点X坐标</string>
+      <string>目标点坐标</string>
      </property>
     </widget>
-    <widget class="QLabel" name="label_11">
-     <property name="geometry">
-      <rect>
-       <x>20</x>
-       <y>100</y>
-       <width>81</width>
-       <height>21</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>目标点Y坐标</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_12">
-     <property name="geometry">
-      <rect>
-       <x>20</x>
-       <y>130</y>
-       <width>81</width>
-       <height>21</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>目标点Z坐标</string>
-     </property>
-    </widget>
-    <widget class="QLineEdit" name="targetPoint_x">
+    <widget class="QLineEdit" name="targetPoint">
      <property name="geometry">
       <rect>
        <x>100</x>
        <y>70</y>
-       <width>113</width>
-       <height>21</height>
-      </rect>
-     </property>
-    </widget>
-    <widget class="QLineEdit" name="targetPoint_y">
-     <property name="geometry">
-      <rect>
-       <x>100</x>
-       <y>100</y>
-       <width>113</width>
-       <height>21</height>
-      </rect>
-     </property>
-    </widget>
-    <widget class="QLineEdit" name="targetPoint_z">
-     <property name="geometry">
-      <rect>
-       <x>100</x>
-       <y>130</y>
-       <width>113</width>
+       <width>171</width>
        <height>21</height>
       </rect>
      </property>
@@ -531,7 +485,7 @@
     <widget class="QPushButton" name="findPoint">
      <property name="geometry">
       <rect>
-       <x>230</x>
+       <x>300</x>
        <y>70</y>
        <width>75</width>
        <height>81</height>

@@ -1,4 +1,4 @@
-#ifndef MAINWINDOW_H
+﻿#ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
 #include <QMainWindow>
@@ -9,6 +9,7 @@
 #include <QThread>
 #include <myprocess.h>
 #include <reconstruction.h>
+#include <QVector3D>
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
@@ -54,6 +55,10 @@ private slots:
     void extractData(const QString &inputFilePath, const QString &outputFilePath) ;
     void on_pushButton_clicked();
 
+    void on_readCloudFile_clicked();
+
+    void on_findPoint_clicked();
+
 private:
     Ui::MainWindow *ui;
     QThread* myProcessThread;
@@ -62,6 +67,13 @@ private:
     reconstruction *myreconstruction;
     QString LocalDatainputFileName;
     QString LocalDataoutputFileName;
+
+    QVector3D parsePointFromLine(const QString& line);
+    QVector3D cloudPoint;
+    double getCloudPointPosition(const QString& filePath,
+                                        const QVector3D& target,
+                                        float eps = 1e-4f) ;  //
+
  signals:
     void start2Cut();
     void startProcess();

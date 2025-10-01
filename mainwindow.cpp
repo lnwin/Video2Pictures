@@ -1,5 +1,6 @@
-#include "mainwindow.h"
+﻿#include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include <QRegularExpression>
 struct PsonnavReadOptions {
     bool verifyChecksum = true;   // 校验 "*HH"；失败行将被跳过
     bool requireValidFlags = false; // 需要位置/姿态状态为 'A' 才收集
@@ -184,7 +185,7 @@ void MainWindow::extractData(const QString &inputFilePath, const QString &output
         if (dataList.size() > 51) {
             // 获取时间和第29、第51个数据
             QString dateTime = dataList.at(dataList.size() - 2).trimmed();  // 假设时间在最后
-            QString angle = dataList[12].trimmed();  // 假设时间在最后
+            QString angle =  dataList[12].trimmed();  // 假设时间在最后
             QString data29 = dataList[23].trimmed();
             QString angle2 = dataList[28].trimmed();
             QString data46 = dataList[46].trimmed();
@@ -291,3 +292,86 @@ void MainWindow::on_pushButton_clicked()
         qDebug() << "First..last =" << hdgs.first() << ".." << hdgs.last();
 }
 
+
+void MainWindow::on_readCloudFile_clicked()
+{
+    QString cloudfileName = QFileDialog::getOpenFileName(this,QStringLiteral("选取点云！"));
+    ui->targetCloudFilePath->setText(cloudfileName);
+
+}
+QVector3D MainWindow::parsePointFromLine(const QString& line)
+{
+    // 按 “空格 或 逗号” 分隔
+    QStringList parts = line.trimmed().split(QRegExp("[,\\s]+"), Qt::SkipEmptyParts);
+    if (parts.size() < 3) return QVector3D();
+
+    bool okx=false, oky=false, okz=false;
+    float x = parts[0].toFloat(&okx);
+    float y = parts[1].toFloat(&oky);
+    float z = parts[2].toFloat(&okz);
+
+    if (!(okx && oky && okz)) return QVector3D(); // 返回空点表示解析失败
+    return QVector3D(x,y,z);
+}
+
+void MainWindow::on_findPoint_clicked()
+{
+
+       cloudPoint=parsePointFromLine(ui->targetPoint->text());
+
+        double ratio = getCloudPointPosition(ui->targetCloudFilePath->text(), cloudPoint, 1e-4f);
+        if (ratio < 0) {
+            ui->textEdit->append("选点未找到或总点数不足。");
+        } else {
+            ui->textEdit->append("选点位置数据位置占比 ： " + QString::number(ratio, 'f', 3));
+        }
+
+
+}
+
+double MainWindow::getCloudPointPosition(const QString& filePath,const QVector3D& target,float eps)   // 小容差，单位同坐标
+{
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return -1.0;
+
+    QTextStream ts(&f);
+    QString line;
+    int index = -1;
+    int lineId = 0;   // 有效点的顺序编号
+
+    while (ts.readLineInto(&line)) {
+        const QString s = line.trimmed();
+        if (s.isEmpty()) continue;
+
+        // 同时兼容 “, 分隔” 和 “空白分隔”
+        QStringList parts;
+        if (s.contains(',')) parts = s.split(',', Qt::SkipEmptyParts);
+        else parts = s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+
+        if (parts.size() < 3) continue;
+
+        bool okx=false, oky=false, okz=false;
+        float x = parts[0].toFloat(&okx);
+        float y = parts[1].toFloat(&oky);
+        float z = parts[2].toFloat(&okz);
+        if (!(okx && oky && okz)) continue;
+
+        if (index < 0) {
+            const QVector3D p(x,y,z);
+            if (eps <= 0.0f) {
+                // 严格匹配（不推荐）
+                if (p.x()==target.x() && p.y()==target.y() && p.z()==target.z())
+                    index = lineId;
+            } else {
+                // 距离平方 <= eps^2 视为命中（推荐）
+                if ((p - target).lengthSquared() <= eps*eps)
+                    index = lineId;
+            }
+        }
+
+        ++lineId;  // 统计有效点数量
+    }
+
+    if (index < 0 || lineId <= 1) return -1.0;
+    return double(index) / double(lineId - 1);  // 转换为 0~1 的相对位置
+}
