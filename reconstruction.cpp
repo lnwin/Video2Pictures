@@ -305,7 +305,7 @@ std::vector<cv::Vec4f> reconstruction::myPushReconstruction(int dir)
         }
 
         // ——生成当前帧点云（你的原逻辑）——
-        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 50);
+        std::vector<cv::Point> laserPointInPixel = myextractLine(laserIMG, 20);
         std::vector<cv::Vec4f> mycloudOnceIMG;
         mycloudOnceIMG.reserve(laserPointInPixel.size());
 

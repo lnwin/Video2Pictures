@@ -445,6 +445,9 @@
        <height>21</height>
       </rect>
      </property>
+     <property name="text">
+      <string>F:/数据集/1号点云/2025_10_01/2025.10.01&amp;&amp;12_52_03.txt</string>
+     </property>
     </widget>
     <widget class="QPushButton" name="readCloudFile">
      <property name="geometry">
