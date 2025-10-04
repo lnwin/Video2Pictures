@@ -34,6 +34,7 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+
 private slots:
     void on_selectVideo_clicked();
 
@@ -67,6 +68,11 @@ private slots:
     void on_findPoint_clicked();
 
     void on_pushButton_2_clicked();
+
+    void on_selectPoint_clicked();
+
+
+    void on_selectPoint_toggled(bool checked);
 
 private:
     Ui::MainWindow *ui;

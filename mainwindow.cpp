@@ -710,3 +710,15 @@ bool MainWindow::processCloudWithYZGroups(const QString& inPath,
     return true;
 
 }
+
+void MainWindow::on_selectPoint_clicked()
+{
+
+}
+
+
+void MainWindow::on_selectPoint_toggled(bool checked)
+{
+    ui->openGLWidget->pickingEnabled=checked;
+}
+

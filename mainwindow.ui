@@ -432,6 +432,19 @@
      </rect>
     </property>
    </widget>
+   <widget class="QRadioButton" name="selectPoint">
+    <property name="geometry">
+     <rect>
+      <x>30</x>
+      <y>590</y>
+      <width>120</width>
+      <height>25</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>选点</string>
+    </property>
+   </widget>
   </widget>
  </widget>
  <customwidgets>

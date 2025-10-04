@@ -55,35 +55,48 @@ void cloudRender::paintGL()
     glBindVertexArray(vao);
     glPointSize(1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
     program->bind();
 
+    // 组装一个临时的 GPU 缓冲（x,y,z,i,sel）
+    const size_t N = pointCloud.size();
+    static std::vector<float> gpuBuf;   // 复用避免反复分配
+    gpuBuf.resize(N * 5);
+    for (size_t i = 0; i < N; ++i) {
+        gpuBuf[i*5 + 0] = pointCloud[i][0];
+        gpuBuf[i*5 + 1] = pointCloud[i][1];
+        gpuBuf[i*5 + 2] = pointCloud[i][2];
+        gpuBuf[i*5 + 3] = pointCloud[i][3];                         // intensity
+        gpuBuf[i*5 + 4] = (i < selectMask.size() ? selectMask[i] : 0.0f); // sel
+    }
+
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, pointCloud.size() * sizeof(cv::Vec4f),
-                 pointCloud.data(), GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, gpuBuf.size() * sizeof(float), gpuBuf.data(), GL_DYNAMIC_DRAW);
 
     // attrib 0: 位置 (x,y,z)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(cv::Vec4f), reinterpret_cast<void*>(0));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5*sizeof(float), reinterpret_cast<void*>(0));
     glEnableVertexAttribArray(0);
 
-    // attrib 1: 强度 (w)
-    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, sizeof(cv::Vec4f),
-                          reinterpret_cast<void*>(3 * sizeof(float)));
+    // attrib 1: 强度
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 5*sizeof(float), reinterpret_cast<void*>(3*sizeof(float)));
     glEnableVertexAttribArray(1);
+
+    // attrib 2: 选择标记
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 5*sizeof(float), reinterpret_cast<void*>(4*sizeof(float)));
+    glEnableVertexAttribArray(2);
 
     program->setUniformValue("projection", projection);
     program->setUniformValue("view", view);
-
-    // 传强度范围（若还没收到数据，min/max 会是 ±inf，片段着色器里已经保护了）
     program->setUniformValue("uMinI", intensityMin);
     program->setUniformValue("uMaxI", intensityMax);
 
-    glDrawArrays(GL_POINTS, 0, pointCloud.size());
+    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(N));
 
+    glDisableVertexAttribArray(2);
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
     program->release();
 }
+
 
 
 void cloudRender::resizeGL(int w, int h)
@@ -199,6 +212,38 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
 {
     lastMousePos = QVector2D(event->pos());
     if (event->button() == Qt::LeftButton) {
+
+        // —— 新增：选点模式 —— //
+        if (pickingEnabled) {
+            float x = (2.0f * event->x()) / width() - 1.0f;
+            float y = 1.0f - (2.0f * event->y()) / height();
+            QVector3D rayStart = unproject(x, y, 0.0f);
+            QVector3D rayEnd   = unproject(x, y, 1.0f);
+            QVector3D rayDir   = (rayEnd - rayStart).normalized();
+
+            int idx = findClosestIndex(rayStart, rayDir);
+            if (idx >= 0) {
+                // 去重
+                if (std::find(pickedIdx.begin(), pickedIdx.end(), idx) == pickedIdx.end()) {
+                    pickedIdx.push_back(idx);
+                }
+                // 收够 3 个：计算并涂色
+                if (pickedIdx.size() == 3) {
+                    // 排序信息若还没准备好，这里保证一下
+                    if (rankOfIndex.size() != pointCloud.size()) {
+                        rebuildSortByXAndRanks();
+                    }
+                    applySelectionFrom3Picked();
+                    // 若选完就退出选点模式，可在此自动关闭；不想自动关则注释下一行
+                    // pickingEnabled = false;
+                    pickedIdx.clear(); // 清空，便于下一轮选择
+                    update();
+                }
+            }
+            return; // 已处理左键
+        }
+
+        // —— 你已有的“点选聚焦”逻辑 —— //
         if (needNewFocus) {
             float x = (2.0f * event->x()) / width() - 1.0f;
             float y = 1.0f - (2.0f * event->y()) / height();
@@ -208,7 +253,6 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
             m_selectedPoint = findClosestPoint(rayStart, rayDir);
             if (!m_selectedPoint.isNull()) {
                 focusPoint = m_selectedPoint;
-                // 相机到焦点距离保持不变
                 updateCamera();
             }
             needNewFocus = false;
@@ -217,11 +261,13 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
             setCursor(Qt::ClosedHandCursor);
             isRotating = true;
         }
-    } else if (event->button() == Qt::RightButton) {
+    }
+    else if (event->button() == Qt::RightButton) {
         isPanning = true;
         setCursor(Qt::SizeAllCursor);
     }
 }
+
 
 void cloudRender::mouseReleaseEvent(QMouseEvent *)
 {
@@ -323,22 +369,33 @@ void cloudRender::getCloud2Show(const std::vector<PcdPoint>& myCloud)
         pointCloud.clear();
         need2Clear = false;
 
-        // 重置强度范围
         intensityMin =  std::numeric_limits<float>::infinity();
         intensityMax = -std::numeric_limits<float>::infinity();
+
+        // 清空选择
+        clearSelection();
     }
 
     pointCloud2Save.insert(pointCloud2Save.end(), myCloud.begin(), myCloud.end());
 
-    pointCloud.reserve(pointCloud.size() + myCloud.size());
+    size_t oldN = pointCloud.size();
+    pointCloud.reserve(oldN + myCloud.size());
     for (const auto& p : myCloud) {
         pointCloud.emplace_back(p.x, p.y, p.z, p.intensity);
-        // 更新强度范围
         if (std::isfinite(p.intensity)) {
             intensityMin = std::min(intensityMin, p.intensity);
             intensityMax = std::max(intensityMax, p.intensity);
         }
     }
+
+    // 确保 selectMask 与 pointCloud 同步
+    selectMask.resize(pointCloud.size(), 0.0f);
+
+    // 数据改变后，若后面要算百分位，需要有排序与 rank
+    // 为避免频繁重排：可以等“第三个点选完”再 rebuild。
+    // 这里简单起见：每次更新都重建（数据量大时可优化）
+    rebuildSortByXAndRanks();
+
     update();
 
 }
@@ -398,3 +455,86 @@ void cloudRender::b2C_openGL()
     // 强制重绘
     update();
 };
+
+
+// 返回“最近点”的索引（基于你已有的光线最近点搜索）
+int cloudRender::findClosestIndex(const QVector3D& rayOrigin, const QVector3D& rayDir)
+{
+    float minDist = std::numeric_limits<float>::max();
+    int   bestIdx = -1;
+    const float searchRadius = 10.0f;
+    for (int i = 0; i < (int)pointCloud.size(); ++i) {
+        const auto& p = pointCloud[i];
+        QVector3D pt(p[0], p[1], p[2]);
+        QVector3D v = pt - rayOrigin;
+        float t = QVector3D::dotProduct(v, rayDir);
+        if (t < 0) continue;
+        QVector3D proj = rayOrigin + rayDir * t;
+        float dist = (pt - proj).length();
+        if (dist < searchRadius && dist < minDist) {
+            minDist = dist;
+            bestIdx = i;
+        }
+    }
+    return bestIdx; // -1 表示没找到
+}
+
+// 以 X 坐标排序，并建立 rankOfIndex
+void cloudRender::rebuildSortByXAndRanks()
+{
+    const int N = (int)pointCloud.size();
+    sortedIdxByX.resize(N);
+    std::iota(sortedIdxByX.begin(), sortedIdxByX.end(), 0);
+    std::sort(sortedIdxByX.begin(), sortedIdxByX.end(),
+              [&](int a, int b){
+                  if (pointCloud[a][0] < pointCloud[b][0]) return true;
+                  if (pointCloud[a][0] > pointCloud[b][0]) return false;
+                  // X 相等时，用 Y/Z 稍作稳定排序（避免 rank 抖动）
+                  if (pointCloud[a][1] != pointCloud[b][1]) return pointCloud[a][1] < pointCloud[b][1];
+                  return pointCloud[a][2] < pointCloud[b][2];
+              });
+
+    rankOfIndex.assign(N, 0);
+    for (int r = 0; r < N; ++r) {
+        rankOfIndex[ sortedIdxByX[r] ] = r;
+    }
+
+    // 保证 selectMask 尺寸同步
+    selectMask.resize(N, 0.0f);
+}
+
+// 由 pickedIdx（3 个）求它们各自的 rank，换算百分比并选中“百分位最小~最大”之间所有点
+void cloudRender::applySelectionFrom3Picked()
+{
+    const int N = (int)pointCloud.size();
+    if (N == 0 || pickedIdx.size() < 3) return;
+    if ((int)rankOfIndex.size() != N) rebuildSortByXAndRanks();
+
+    int r0 = rankOfIndex[pickedIdx[0]];
+    int r1 = rankOfIndex[pickedIdx[1]];
+    int r2 = rankOfIndex[pickedIdx[2]];
+
+    int rmin = std::min(r0, std::min(r1, r2));
+    int rmax = std::max(r0, std::max(r1, r2));
+
+    // 百分比仅用于显示/记录（选中集合实际等价于 rank 区间）
+    // float pmin = (N>1) ? (float)rmin / (float)(N-1) : 0.0f;
+    // float pmax = (N>1) ? (float)rmax / (float)(N-1) : 1.0f;
+
+    // 清旧的选择
+    std::fill(selectMask.begin(), selectMask.end(), 0.0f);
+
+    // 把 rank ∈ [rmin, rmax] 的点全部置 1（绿色）
+    for (int r = rmin; r <= rmax; ++r) {
+        int idx = sortedIdxByX[r];
+        selectMask[idx] = 1.0f;
+    }
+}
+
+// 清除绿色高亮和已选点
+void cloudRender::clearSelection()
+{
+    pickedIdx.clear();
+    selectMask.assign(pointCloud.size(), 0.0f);
+}
+

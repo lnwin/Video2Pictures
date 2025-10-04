@@ -30,6 +30,7 @@ public:
     void selectFocus(); // 启用点选聚焦
 
 
+     bool pickingEnabled = false;
 signals:
     void sendUpdateSIG();
     void saveMyCloud_openGL(std::vector<PcdPoint>);
@@ -83,48 +84,50 @@ private:
     QVector3D unproject(float x, float y, float depth);
     QVector3D findClosestPoint(const QVector3D& rayOrigin, const QVector3D& rayDirection);
 
-    // 顶点着色器：位置(location=0) + 强度(location=1)
+    // 顶点：位置 + 强度 + 选择标记
     static constexpr const char* vertexShaderSource = R"(
     #version 330 core
     layout (location = 0) in vec3 aPos;
-    layout (location = 1) in float aI;   // intensity
+    layout (location = 1) in float aI;
+    layout (location = 2) in float aSel;
     out float vI;
+    out float vSel;
     uniform mat4 projection;
     uniform mat4 view;
     void main()
     {
         vI = aI;
+        vSel = aSel;
         gl_Position = projection * view * vec4(aPos, 1.0);
-
     }
 )";
 
-    // 片段着色器：把强度映射到颜色
     static constexpr const char* fragmentShaderSource = R"(
     #version 330 core
     in float vI;
+    in float vSel;
     out vec4 FragColor;
     uniform float uMinI;
     uniform float uMaxI;
 
-
     vec3 jet(float t) {
-
         float r = clamp(1.5 - abs(4.0*(t-0.75)), 0.0, 1.0);
         float g = clamp(1.5 - abs(4.0*(t-0.50)), 0.0, 1.0);
         float b = clamp(1.5 - abs(4.0*(t-0.25)), 0.0, 1.0);
-        return vec3(r, g, b);
+        return vec3(r,g,b);
     }
 
     void main()
     {
-        float t;
-        if (uMaxI <= uMinI) {
-            t = 0.0;
-        } else {
-            t = clamp((vI - uMinI) / (uMaxI - uMinI), 0.0, 1.0);
+
+        if (vSel > 0.5) {
+            FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+            return;
         }
 
+        float t;
+        if (uMaxI <= uMinI) t = 0.0;
+        else t = clamp((vI - uMinI) / (uMaxI - uMinI), 0.0, 1.0);
         vec3 col = jet(t);
         FragColor = vec4(col, 1.0);
     }
@@ -143,6 +146,20 @@ private:
         // 让相机距离保持在 (near, far) 的合理区间内，给一点余量
         cameraDistance = std::clamp(cameraDistance, kNearPlane * 2.0f, kFarPlane * 0.95f);
     }
+
+    // —— 选点 & 排序/遮罩 —— //
+                   // 左键是否用于选点
+    std::vector<int> pickedIdx;                  // 已选中的三个点的“索引”
+    std::vector<int> sortedIdxByX;               // 全局点云按 X 从小到大排序后的“索引数组”
+    std::vector<int> rankOfIndex;                // rankOfIndex[i] = 点 i 在按 X 排序后的名次（0~N-1）
+    std::vector<float> selectMask;               // 与 pointCloud 等长：0=未选中, 1=绿色高亮
+
+    int   findClosestIndex(const QVector3D& rayOrigin, const QVector3D& rayDir);
+    void  rebuildSortByXAndRanks();              // 根据 pointCloud 重建排序与 rank
+    void  applySelectionFrom3Picked();           // 由 3 个 pickedIdx 计算区间并更新 selectMask
+    void  clearSelection();                      // 清除绿色高亮与已选点
+
+
 };
 
 #endif // CLOUDRENDER_H
