@@ -546,6 +546,8 @@ void MainWindow::on_CurveStretching_toggled(bool checked)
 void MainWindow::on_Swing_toggled(bool checked)
 {
     ui->openGLWidget->pickingEnabled_swing =checked;
+    if(!checked)
+    {ui->openGLWidget->clearSelection();}
 }
 
 
