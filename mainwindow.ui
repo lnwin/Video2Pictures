@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1061</width>
-    <height>293</height>
+    <width>2031</width>
+    <height>1016</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -311,102 +311,12 @@
      <string>使用插值</string>
     </property>
    </widget>
-   <widget class="QGroupBox" name="groupBox">
-    <property name="geometry">
-     <rect>
-      <x>830</x>
-      <y>10</y>
-      <width>221</width>
-      <height>121</height>
-     </rect>
-    </property>
-    <property name="title">
-     <string>备用</string>
-    </property>
-    <widget class="QPushButton" name="pushButton">
-     <property name="enabled">
-      <bool>false</bool>
-     </property>
-     <property name="geometry">
-      <rect>
-       <x>10</x>
-       <y>80</y>
-       <width>81</width>
-       <height>31</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>读取惯导数据</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_8">
-     <property name="enabled">
-      <bool>false</bool>
-     </property>
-     <property name="geometry">
-      <rect>
-       <x>10</x>
-       <y>20</y>
-       <width>91</width>
-       <height>21</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>标定文件路径</string>
-     </property>
-    </widget>
-    <widget class="QPushButton" name="startGetOut">
-     <property name="enabled">
-      <bool>false</bool>
-     </property>
-     <property name="geometry">
-      <rect>
-       <x>100</x>
-       <y>50</y>
-       <width>111</width>
-       <height>23</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>开始提取</string>
-     </property>
-    </widget>
-    <widget class="QLineEdit" name="localTxt">
-     <property name="enabled">
-      <bool>false</bool>
-     </property>
-     <property name="geometry">
-      <rect>
-       <x>100</x>
-       <y>20</y>
-       <width>111</width>
-       <height>23</height>
-      </rect>
-     </property>
-    </widget>
-    <widget class="QPushButton" name="selectLocalTxt">
-     <property name="enabled">
-      <bool>false</bool>
-     </property>
-     <property name="geometry">
-      <rect>
-       <x>10</x>
-       <y>50</y>
-       <width>81</width>
-       <height>23</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>选择文件</string>
-     </property>
-    </widget>
-   </widget>
    <widget class="QTextEdit" name="textEdit">
     <property name="geometry">
      <rect>
-      <x>450</x>
-      <y>190</y>
-      <width>391</width>
+      <x>10</x>
+      <y>470</y>
+      <width>421</width>
       <height>91</height>
      </rect>
     </property>
@@ -414,9 +324,9 @@
    <widget class="QGroupBox" name="groupBox_2">
     <property name="geometry">
      <rect>
-      <x>450</x>
-      <y>10</y>
-      <width>381</width>
+      <x>10</x>
+      <y>290</y>
+      <width>421</width>
       <height>171</height>
      </rect>
     </property>
@@ -427,7 +337,7 @@
      <property name="geometry">
       <rect>
        <x>20</x>
-       <y>30</y>
+       <y>40</y>
        <width>81</width>
        <height>21</height>
       </rect>
@@ -440,22 +350,22 @@
      <property name="geometry">
       <rect>
        <x>100</x>
-       <y>30</y>
-       <width>171</width>
+       <y>40</y>
+       <width>211</width>
        <height>21</height>
       </rect>
      </property>
      <property name="text">
-      <string>F:/数据集/1号点云/2025_10_01/2025.10.01&amp;&amp;12_52_03.txt</string>
+      <string>E:/01-公司相关/02-渊视/12-测试/2025.9.29 中山大学激光雷达测试/3号点云/2025_10_04/2025.10.04&amp;&amp;13_12_42.txt</string>
      </property>
     </widget>
     <widget class="QPushButton" name="readCloudFile">
      <property name="geometry">
       <rect>
-       <x>280</x>
+       <x>320</x>
        <y>30</y>
        <width>91</width>
-       <height>23</height>
+       <height>41</height>
       </rect>
      </property>
      <property name="text">
@@ -466,7 +376,7 @@
      <property name="geometry">
       <rect>
        <x>20</x>
-       <y>70</y>
+       <y>80</y>
        <width>81</width>
        <height>21</height>
       </rect>
@@ -479,8 +389,8 @@
      <property name="geometry">
       <rect>
        <x>100</x>
-       <y>70</y>
-       <width>171</width>
+       <y>80</y>
+       <width>211</width>
        <height>21</height>
       </rect>
      </property>
@@ -488,8 +398,8 @@
     <widget class="QPushButton" name="findPoint">
      <property name="geometry">
       <rect>
-       <x>284</x>
-       <y>70</y>
+       <x>320</x>
+       <y>80</y>
        <width>91</width>
        <height>21</height>
       </rect>
@@ -503,7 +413,7 @@
       <rect>
        <x>10</x>
        <y>110</y>
-       <width>361</width>
+       <width>401</width>
        <height>51</height>
       </rect>
      </property>
@@ -512,8 +422,25 @@
      </property>
     </widget>
    </widget>
+   <widget class="cloudRender" name="openGLWidget">
+    <property name="geometry">
+     <rect>
+      <x>460</x>
+      <y>10</y>
+      <width>1541</width>
+      <height>941</height>
+     </rect>
+    </property>
+   </widget>
   </widget>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>cloudRender</class>
+   <extends>QOpenGLWidget</extends>
+   <header location="global">cloudrender.h</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

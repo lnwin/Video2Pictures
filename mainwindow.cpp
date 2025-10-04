@@ -220,19 +220,9 @@ void MainWindow::on_checkBox_stateChanged(int arg1)
 }
 
 
-void MainWindow::on_selectLocalTxt_clicked()
-{
-    QString fileName = QFileDialog::getOpenFileName(this,QStringLiteral("位置文件选择对话框！"));
-    ui->localTxt->setText(fileName);
-    LocalDatainputFileName=fileName;
-    LocalDataoutputFileName=LocalDatainputFileName.chopped(4)+="_out.txt";
-}
 
 
-void MainWindow::on_startGetOut_clicked()
-{
-    extractData(LocalDatainputFileName,LocalDataoutputFileName);
-}
+
 void MainWindow::extractData(const QString &inputFilePath, const QString &outputFilePath) {
     QFile inputFile(inputFilePath);
     if (!inputFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -351,24 +341,155 @@ QVector<double> loadHeadingsFromPsonnavFile(const QString& path,
     }
     return headings;
 }
-void MainWindow::on_pushButton_clicked()
-{
-    QString fileName = QFileDialog::getOpenFileName(this,QStringLiteral("选择惯导文件!"));
-    PsonnavReadOptions opt;
-    opt.verifyChecksum   = true;   // 建议开启
-    opt.requireValidFlags = false; // 需要时改为 true
-
-    QVector<double> hdgs = loadHeadingsFromPsonnavFile(fileName, opt);
-    qDebug() << "Headings parsed:" << hdgs.size();
-    if (!hdgs.isEmpty())
-        qDebug() << "First..last =" << hdgs.first() << ".." << hdgs.last();
+// 兼容“逗号 or 任意空白”分隔
+static inline QStringList splitFlexible(const QString& s) {
+    return s.contains(',') ? s.split(',', Qt::SkipEmptyParts)
+                           : s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
 }
 
+// 解析一行：xyz 必须；强度、时间戳可选
+// 返回 true 表示成功，并填充 out
+static bool parsePcdLine(const QString& line, PcdPoint& out) {
+    const QString s = line.trimmed();
+    if (s.isEmpty()) return false;
+    if (s.startsWith('#') || s.startsWith("//")) return false; // 注释行
+
+    const QStringList parts = splitFlexible(s);
+    if (parts.size() < 3) return false;
+
+    bool okx=false, oky=false, okz=false;
+    float x = parts[0].toFloat(&okx);
+    float y = parts[1].toFloat(&oky);
+    float z = parts[2].toFloat(&okz);
+    if (!(okx && oky && okz)) return false;
+
+    float intensity = 0.0f;
+    quint64 ts_ms = 0;
+
+    if (parts.size() >= 4) {
+        // 第4列优先按强度解析（浮点），失败就按整型时间戳解析
+        bool okI=false; float I = parts[3].toFloat(&okI);
+        if (okI) {
+            intensity = I;
+            if (parts.size() >= 5) {
+                bool okt=false; quint64 t = parts[4].toULongLong(&okt);
+                if (okt) ts_ms = t;
+            }
+        } else {
+            bool okt=false; quint64 t = parts[3].toULongLong(&okt);
+            if (okt) ts_ms = t;
+        }
+    }
+
+    out.x = x; out.y = y; out.z = z;
+    out.intensity = intensity;  // 保留原值（是否归一化交给渲染侧）
+    out.ts_ms = ts_ms;
+    return true;
+}
+
+// 读取文件并按批量调用 viewer->getCloud2Show(batch)
+// normalizeIntensity=true 时，会把强度归一化到 [0,1]（若文件无强度，则按 Z 归一化）
+static bool loadTxtAndFeedToViewer(const QString& path,
+                                   cloudRender* viewer,
+                                   bool normalizeIntensity = true,
+                                   int batchSize = 200000)
+{
+    if (!viewer) return false;
+
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "[loadTxt] open failed:" << path;
+        return false;
+    }
+    QTextStream ts(&f);
+    ts.setCodec("UTF-8");
+
+    // 先一遍扫描：统计 min/max（用于可选归一化）
+    bool first = true;
+    float minZ=0.f, maxZ=0.f, minI=0.f, maxI=0.f;
+    bool hasAnyIntensity = false;
+
+    // 为了不二次读取整文件到内存，这里先简单地重读两遍文件（一次求范围，一次喂数据）。
+    // 如果不想两遍读：可以先不归一化，直接喂；或边读边分块缓存做局部归一化（略复杂）。
+    {
+        QString line;
+        while (ts.readLineInto(&line)) {
+            PcdPoint p;
+            if (!parsePcdLine(line, p)) continue;
+
+            if (first) {
+                minZ = maxZ = p.z;
+                minI = maxI = p.intensity;
+                first = false;
+            } else {
+                minZ = std::min(minZ, p.z); maxZ = std::max(maxZ, p.z);
+                minI = std::min(minI, p.intensity); maxI = std::max(maxI, p.intensity);
+            }
+            if (std::isfinite(p.intensity) && std::fabs(p.intensity) > 1e-12f)
+                hasAnyIntensity = true;
+        }
+    }
+    f.seek(0);  // 回到开头再读一遍
+    ts.seek(0);
+
+    std::vector<PcdPoint> batch;
+    batch.reserve(std::min(batchSize, 800000)); // 预留一点
+
+    const bool doI = normalizeIntensity && hasAnyIntensity && (std::fabs(maxI - minI) > 1e-6f);
+    const bool doZ = normalizeIntensity && !hasAnyIntensity && (std::fabs(maxZ - minZ) > 1e-6f);
+    const float invI = doI ? (1.0f / (maxI - minI)) : 1.0f;
+    const float invZ = doZ ? (1.0f / (maxZ - minZ)) : 1.0f;
+
+    QString line;
+    qint64 total = 0;
+    while (ts.readLineInto(&line)) {
+        PcdPoint p;
+        if (!parsePcdLine(line, p)) continue;
+
+        if (normalizeIntensity) {
+            if (doI) {
+                p.intensity = std::clamp((p.intensity - minI) * invI, 0.0f, 1.0f);
+            } else if (doZ) {
+                p.intensity = std::clamp((p.z - minZ) * invZ, 0.0f, 1.0f);
+            } else {
+                // 没有可归一化的范围，保持原值（可能全 0）
+            }
+        }
+
+        batch.push_back(p);
+        ++total;
+
+        if ((int)batch.size() >= batchSize) {
+            viewer->getCloud2Show(batch);
+            batch.clear();
+            // 可选：让事件循环喘口气（避免 UI 假死）
+            qApp->processEvents();
+        }
+    }
+
+    if (!batch.empty()) {
+        viewer->getCloud2Show(batch);
+        batch.clear();
+    }
+
+    f.close();
+    qDebug() << "[loadTxt] fed points =" << total << "file =" << path;
+    // 可选：让视角回到中心（如你已有 b2C_openGL）
+    viewer->b2C_openGL();
+    return (total > 0);
+}
 
 void MainWindow::on_readCloudFile_clicked()
 {
+
     QString cloudfileName = QFileDialog::getOpenFileName(this,QStringLiteral("选取点云！"));
     ui->targetCloudFilePath->setText(cloudfileName);
+    // 这里最好检查一下返回值
+    // 假设你的控件对象名是 openGLWidget，类型是 cloudRender*
+    if (!loadTxtAndFeedToViewer(cloudfileName, ui->openGLWidget, /*normalizeIntensity=*/true, /*batchSize=*/200000)) {
+        QMessageBox::warning(this, tr("读取失败"), cloudfileName);
+    }
+
 
 }
 QVector3D MainWindow::parsePointFromLine(const QString& line)
@@ -454,18 +575,13 @@ void MainWindow::on_pushButton_2_clicked()
 
     std::vector<YZOffsetGroup> groups = {
                    //start end    y0   y1    z0   z1   lerp useV  v(m/s)
-      { /*全段*/     0.00, 0.384,  0.0, 0.0,  0.0, 0.0, true,true, 0.075 },
-      { /*全段*/     0.384, 0.59,  0.0, -50.0,  0.0, 0.0, true,true, 0.075 },
-      { /*全段*/     0.59, 0.779,  -50.0, -150.0,  0.0, 0.0, true,true, 0.075 },
-      { /*全段*/     0.779, 0.843,  -150.0, -160.0,  0.0, 0.0, true,true, 0.075 },//从这开始加2段
-
-        { /*全段*/     0.843, 0.856,  -160.0, -160.0,  0.0, 5.0, true,true, 0.075 },
-        { /*全段*/     0.856, 0.881,  -160.0, -150.0,  5.0, 7.0, true,true, 0.075 },
+      { /*全段*/     0.00, 0.220,  0.0, 0.0,  0.0, 0.0, true,true, 0.1 },
+      { /*全段*/     0.220, 0.253,  -7.0, 00.0, 0.0, 0.0, true,true, 0.1 },
 
 
-      { /*全段*/     0.881, 0.935,  -150.0, -150.0,  7.0, 30.0, true,true, 0.075 },
-      { /*全段*/     0.935, 0.971,  -150.0, -100.0,  30.0, 60.0, true,true, 0.075 },
-      { /*全段*/     0.971, 1.00,  -100.0, -100.0,  60.0, 90.0, true,true, 0.075 },
+      { /*全段*/     0.291, 0.31,  0.0, 0.0,  0.0, 0.0, true,true, 0.1 },
+
+        { /*全段*/     0.31, 1.0,  0.0, 0.0,  0.0, 0.0, true,true, 0.1 },
 
 
       };
