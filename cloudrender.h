@@ -48,6 +48,10 @@ protected:
     void enterEvent(QEvent *event) override;
 
 private:
+    // private:
+    float intensityMin =  std::numeric_limits<float>::infinity();
+    float intensityMax = -std::numeric_limits<float>::infinity();
+
     QVector3D cameraUp = QVector3D(0, 1, 0);   // 可变的上方向（不做横滚）
     QVector3D m_worldUp = QVector3D(0, 1, 0);  // 初始化后会同步成你的初始 up
     QQuaternion m_rot;          // 相机朝向（相机->世界）
@@ -79,25 +83,53 @@ private:
     QVector3D unproject(float x, float y, float depth);
     QVector3D findClosestPoint(const QVector3D& rayOrigin, const QVector3D& rayDirection);
 
-    // Shader源码
+    // 顶点着色器：位置(location=0) + 强度(location=1)
     static constexpr const char* vertexShaderSource = R"(
-        #version 330 core
-        layout (location = 0) in vec3 aPos;
-        uniform mat4 projection;
-        uniform mat4 view;
-        void main()
-        {
-            gl_Position = projection * view * vec4(aPos, 1.0);
-        }
-    )";
+    #version 330 core
+    layout (location = 0) in vec3 aPos;
+    layout (location = 1) in float aI;   // intensity
+    out float vI;
+    uniform mat4 projection;
+    uniform mat4 view;
+    void main()
+    {
+        vI = aI;
+        gl_Position = projection * view * vec4(aPos, 1.0);
+
+    }
+)";
+
+    // 片段着色器：把强度映射到颜色
     static constexpr const char* fragmentShaderSource = R"(
-        #version 330 core
-        out vec4 FragColor;
-        void main()
-        {
-            FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);
+    #version 330 core
+    in float vI;
+    out vec4 FragColor;
+    uniform float uMinI;
+    uniform float uMaxI;
+
+
+    vec3 jet(float t) {
+
+        float r = clamp(1.5 - abs(4.0*(t-0.75)), 0.0, 1.0);
+        float g = clamp(1.5 - abs(4.0*(t-0.50)), 0.0, 1.0);
+        float b = clamp(1.5 - abs(4.0*(t-0.25)), 0.0, 1.0);
+        return vec3(r, g, b);
+    }
+
+    void main()
+    {
+        float t;
+        if (uMaxI <= uMinI) {
+            t = 0.0;
+        } else {
+            t = clamp((vI - uMinI) / (uMaxI - uMinI), 0.0, 1.0);
         }
-    )";
+
+        vec3 col = jet(t);
+        FragColor = vec4(col, 1.0);
+    }
+)";
+
 
     // 工具
     void updateCamera();

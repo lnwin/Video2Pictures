@@ -46,32 +46,41 @@ void cloudRender::initializeGL()
     // ③ 用当前 m_rot/m_worldUp 统一刷新相机与 view
     updateProjection();
     updateCamera();                     // 内部用 m_rot + m_worldUp
+    intensityMin =  std::numeric_limits<float>::infinity();
+    intensityMax = -std::numeric_limits<float>::infinity();
 }
 
 void cloudRender::paintGL()
 {
     glBindVertexArray(vao);
     glPointSize(1.0f);
-
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // ← 清深度
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     program->bind();
 
-    // VBO 数据
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, pointCloud.size() * sizeof(cv::Vec4f),
                  pointCloud.data(), GL_DYNAMIC_DRAW);
 
-    // attrib 0: 位置
+    // attrib 0: 位置 (x,y,z)
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(cv::Vec4f), reinterpret_cast<void*>(0));
     glEnableVertexAttribArray(0);
 
-    // 传 uniform（projection 在别处更新也没关系，这里每帧设一次更稳）
+    // attrib 1: 强度 (w)
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, sizeof(cv::Vec4f),
+                          reinterpret_cast<void*>(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
     program->setUniformValue("projection", projection);
     program->setUniformValue("view", view);
 
+    // 传强度范围（若还没收到数据，min/max 会是 ±inf，片段着色器里已经保护了）
+    program->setUniformValue("uMinI", intensityMin);
+    program->setUniformValue("uMaxI", intensityMax);
+
     glDrawArrays(GL_POINTS, 0, pointCloud.size());
 
+    glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
     program->release();
 }
@@ -309,18 +318,27 @@ void cloudRender::selectFocus()
 
 void cloudRender::getCloud2Show(const std::vector<PcdPoint>& myCloud)
 {
-    if(need2Clear)
-    {
+    if (need2Clear) {
         pointCloud2Save.clear();
         pointCloud.clear();
-        need2Clear=false;
+        need2Clear = false;
+
+        // 重置强度范围
+        intensityMin =  std::numeric_limits<float>::infinity();
+        intensityMax = -std::numeric_limits<float>::infinity();
     }
 
     pointCloud2Save.insert(pointCloud2Save.end(), myCloud.begin(), myCloud.end());
 
     pointCloud.reserve(pointCloud.size() + myCloud.size());
-    for (const auto& p : myCloud)
+    for (const auto& p : myCloud) {
         pointCloud.emplace_back(p.x, p.y, p.z, p.intensity);
+        // 更新强度范围
+        if (std::isfinite(p.intensity)) {
+            intensityMin = std::min(intensityMin, p.intensity);
+            intensityMax = std::max(intensityMax, p.intensity);
+        }
+    }
     update();
 
 }
