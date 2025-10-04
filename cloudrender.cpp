@@ -529,6 +529,11 @@ void cloudRender::applySelectionFrom3Picked()
         int idx = sortedIdxByX[r];
         selectMask[idx] = 1.0f;
     }
+
+
+    selRmin = rmin;
+    selRmax = rmax;
+    haveSelection = (selRmin >= 0 && selRmax >= selRmin);
 }
 
 // 清除绿色高亮和已选点
@@ -536,5 +541,56 @@ void cloudRender::clearSelection()
 {
     pickedIdx.clear();
     selectMask.assign(pointCloud.size(), 0.0f);
+    haveSelection = false;
+    selRmin = selRmax = -1;
 }
 
+void cloudRender::keyPressEvent(QKeyEvent *event)
+{
+    if (!haveSelection || pointCloud.empty() || selRmin < 0 || selRmax < selRmin) {
+        QOpenGLWidget::keyPressEvent(event);
+        return;
+    }
+
+    // 方向键判断：←/→ 作用 Y；↑/↓ 作用 Z
+    float dY = 0.0f, dZ = 0.0f;
+    switch (event->key()) {
+    case Qt::Key_Left:  dY = -stepY; break;   // 左：Y 负方向
+    case Qt::Key_Right: dY =  stepY; break;   // 右：Y 正方向
+    case Qt::Key_Up:    dZ =  stepZ; break;   // 上：Z 正方向
+    case Qt::Key_Down:  dZ = -stepZ; break;   // 下：Z 负方向
+    default:
+        QOpenGLWidget::keyPressEvent(event);
+        return;
+    }
+
+    // 支持修饰键微调（可选）：Shift=×10，Ctrl=×0.1
+    float mul = 1.0f;
+    if (event->modifiers() & Qt::ShiftModifier) mul *= 10.0f;
+    if (event->modifiers() & Qt::ControlModifier) mul *= 0.1f;
+    dY *= mul; dZ *= mul;
+
+    // 对选中区间 [selRmin, selRmax] 施加 Hann 窗权重：
+    // w(n) = 0.5 * (1 - cos(2π * n/(N-1)))，n=0..N-1
+    const int rmin = selRmin, rmax = selRmax;
+    const int Nsel = rmax - rmin + 1;
+    if (Nsel <= 0) return;
+
+    // Nsel==1 时，权重直接 1
+    for (int r = rmin; r <= rmax; ++r) {
+        int n = r - rmin;           // 映射到 0..Nsel-1
+        float w = 1.0f;
+        if (Nsel > 1) {
+            float arg = 2.0f * float(M_PI) * float(n) / float(Nsel - 1);
+            w = 0.5f * (1.0f - std::cos(arg));   // 边=0，中间≈1
+        }
+
+        int idx = sortedIdxByX[r];
+        // 只改 Y/Z，不改 X（不会影响 X 排序与百分位）
+        pointCloud[idx][1] += dY * w;  // Y
+        pointCloud[idx][2] += dZ * w;  // Z
+    }
+
+    // 位置变了，重绘即可；X 未变，无需重建排序/百分位
+    update();
+}
