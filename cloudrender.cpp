@@ -214,7 +214,7 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton) {
 
         // —— 新增：选点模式 —— //
-        if (pickingEnabled) {
+        if (pickingEnabled || pickingEnabled_swing) {
             float x = (2.0f * event->x()) / width() - 1.0f;
             float y = 1.0f - (2.0f * event->y()) / height();
             QVector3D rayStart = unproject(x, y, 0.0f);
@@ -543,54 +543,120 @@ void cloudRender::clearSelection()
     selectMask.assign(pointCloud.size(), 0.0f);
     haveSelection = false;
     selRmin = selRmax = -1;
+    update();
+
 }
 
 void cloudRender::keyPressEvent(QKeyEvent *event)
 {
+    // 如果两个模式都关闭，不响应任何键盘事件
+    if ((!pickingEnabled) && (!pickingEnabled_swing)) {
+        QOpenGLWidget::keyPressEvent(event);
+        return;
+    }
+
     if (!haveSelection || pointCloud.empty() || selRmin < 0 || selRmax < selRmin) {
         QOpenGLWidget::keyPressEvent(event);
         return;
     }
 
-    // 方向键判断：←/→ 作用 Y；↑/↓ 作用 Z
     float dY = 0.0f, dZ = 0.0f;
     switch (event->key()) {
-    case Qt::Key_Left:  dY = -stepY; break;   // 左：Y 负方向
-    case Qt::Key_Right: dY =  stepY; break;   // 右：Y 正方向
-    case Qt::Key_Up:    dZ =  stepZ; break;   // 上：Z 正方向
-    case Qt::Key_Down:  dZ = -stepZ; break;   // 下：Z 负方向
+    case Qt::Key_Left:  dY = -stepY; break;
+    case Qt::Key_Right: dY =  stepY; break;
+    case Qt::Key_Up:    dZ =  stepZ; break;
+    case Qt::Key_Down:  dZ = -stepZ; break;
     default:
         QOpenGLWidget::keyPressEvent(event);
         return;
     }
 
-    // 支持修饰键微调（可选）：Shift=×10，Ctrl=×0.1
     float mul = 1.0f;
-    if (event->modifiers() & Qt::ShiftModifier) mul *= 10.0f;
+    if (event->modifiers() & Qt::ShiftModifier)  mul *= 10.0f;
     if (event->modifiers() & Qt::ControlModifier) mul *= 0.1f;
     dY *= mul; dZ *= mul;
 
-    // 对选中区间 [selRmin, selRmax] 施加 Hann 窗权重：
-    // w(n) = 0.5 * (1 - cos(2π * n/(N-1)))，n=0..N-1
     const int rmin = selRmin, rmax = selRmax;
     const int Nsel = rmax - rmin + 1;
     if (Nsel <= 0) return;
 
-    // Nsel==1 时，权重直接 1
     for (int r = rmin; r <= rmax; ++r) {
-        int n = r - rmin;           // 映射到 0..Nsel-1
+        int idx = sortedIdxByX[r];
         float w = 1.0f;
-        if (Nsel > 1) {
-            float arg = 2.0f * float(M_PI) * float(n) / float(Nsel - 1);
-            w = 0.5f * (1.0f - std::cos(arg));   // 边=0，中间≈1
+
+        if (pickingEnabled_swing) {
+            // —— 线性权重 ——
+            if (Nsel > 1) w = float(r - rmin) / float(Nsel - 1);
+            else          w = 1.0f;
+        }
+        else if (pickingEnabled) {
+            // —— Hann 窗权重 ——
+            if (Nsel > 1) {
+                float arg = 2.0f * float(M_PI) * float(r - rmin) / float(Nsel - 1);
+                w = 0.5f * (1.0f - std::cos(arg));
+            } else {
+                w = 1.0f;
+            }
+        }
+        else {
+            w = 0.0f; // 两个都 false 的情况不会到这里，因为上面 return 了
         }
 
-        int idx = sortedIdxByX[r];
-        // 只改 Y/Z，不改 X（不会影响 X 排序与百分位）
-        pointCloud[idx][1] += dY * w;  // Y
-        pointCloud[idx][2] += dZ * w;  // Z
+        // 只改 Y/Z
+        pointCloud[idx][1] += dY * w;
+        pointCloud[idx][2] += dZ * w;
     }
 
-    // 位置变了，重绘即可；X 未变，无需重建排序/百分位
     update();
+}
+void cloudRender::saveAfterprocessTxt(const QString& dirPath)
+{
+    // 1) 校验点云
+    if (pointCloud.empty()) {
+        QMessageBox::information(this, tr("提示"), tr("当前没有可保存的点云数据。"));
+        return;
+    }
+
+    // 2) 准备输出目录与文件路径
+    QDir outDir(dirPath);
+    if (!outDir.exists()) {
+        if (!outDir.mkpath(".")) {
+            QMessageBox::warning(this, tr("错误"), tr("无法创建输出目录：%1").arg(dirPath));
+            return;
+        }
+    }
+    const QString filePath = outDir.filePath("afterprocess.txt");
+
+    // 3) 用 QSaveFile 保证写入原子性
+    QSaveFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, tr("错误"), tr("无法打开文件用于写入：%1").arg(filePath));
+        return;
+    }
+
+    // 4) 文本流设置为 C 区域，使用 '.' 作为小数点，避免本地化逗号
+    QTextStream ts(&file);
+    ts.setLocale(QLocale::c());
+    ts.setRealNumberNotation(QTextStream::ScientificNotation); // 或 FixedNotation
+    ts.setRealNumberPrecision(7); // 精度可按需调整
+
+    // 5) 写入数据：x y z intensity，每行一条
+    //    注意：pointCloud 是 std::vector<cv::Vec4f>，依次为 x y z intensity
+    const qsizetype N = static_cast<qsizetype>(pointCloud.size());
+    for (qsizetype i = 0; i < N; ++i) {
+        const cv::Vec4f& p = pointCloud[static_cast<size_t>(i)];
+        // 跳过非有限值（可按需保留）
+        if (!(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]) && std::isfinite(p[3]))) {
+            continue;
+        }
+        ts << p[0] << ' ' << p[1] << ' ' << p[2] << ' ' << p[3] << '\n';
+    }
+
+    // 6) 提交写入
+    if (!file.commit()) {
+        QMessageBox::warning(this, tr("错误"), tr("写入失败：%1").arg(file.errorString()));
+        return;
+    }
+
+    QMessageBox::information(this, tr("完成"), tr("已保存点云到：%1").arg(filePath));
 }

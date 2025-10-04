@@ -55,24 +55,21 @@ private slots:
 
     void on_speed_textChanged(const QString &arg1);
 
-    void on_PZAngle_textChanged(const QString &arg1);
-
-
-    void on_checkBox_stateChanged(int arg1);
 
     void extractData(const QString &inputFilePath, const QString &outputFilePath) ;
 
 
     void on_readCloudFile_clicked();
 
-    void on_findPoint_clicked();
-
-    void on_pushButton_2_clicked();
-
-    void on_selectPoint_clicked();
 
 
-    void on_selectPoint_toggled(bool checked);
+    void on_CurveStretching_toggled(bool checked);
+
+    void on_Swing_toggled(bool checked);
+
+    void on_selectCloudOutPath_2_clicked();
+
+    void on_pushButton_clicked();
 
 private:
     Ui::MainWindow *ui;

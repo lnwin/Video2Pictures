@@ -197,29 +197,6 @@ void MainWindow::on_speed_textChanged(const QString &arg1)
 }
 
 
-void MainWindow::on_PZAngle_textChanged(const QString &arg1)
-{
-    myreconstruction->PZAngle=arg1.toFloat();
-}
-
-
-
-
-
-void MainWindow::on_checkBox_stateChanged(int arg1)
-{
-    qDebug()<<arg1;
-    if(arg1==2)
-    {
-        myreconstruction->useChaZhi=true;
-    }
-    else
-    {
-        myreconstruction->useChaZhi=false;
-    }
-}
-
-
 
 
 
@@ -507,20 +484,7 @@ QVector3D MainWindow::parsePointFromLine(const QString& line)
     return QVector3D(x,y,z);
 }
 
-void MainWindow::on_findPoint_clicked()
-{
 
-       cloudPoint=parsePointFromLine(ui->targetPoint->text());
-
-        double ratio = getCloudPointPosition(ui->targetCloudFilePath->text(), cloudPoint, 1e-4f);
-        if (ratio < 0) {
-            ui->textEdit->append("选点未找到或总点数不足。");
-        } else {
-            ui->textEdit->append("选点位置数据位置占比 ： " + QString::number(ratio, 'f', 3));
-        }
-
-
-}
 
 double MainWindow::getCloudPointPosition(const QString& filePath,const QVector3D& target,float eps)   // 小容差，单位同坐标
 {
@@ -569,156 +533,39 @@ double MainWindow::getCloudPointPosition(const QString& filePath,const QVector3D
     return double(index) / double(lineId - 1);  // 转换为 0~1 的相对位置
 }
 
-void MainWindow::on_pushButton_2_clicked()
-{
 
 
-    std::vector<YZOffsetGroup> groups = {
-                   //start end    y0   y1    z0   z1   lerp useV  v(m/s)
-      { /*全段*/     0.00, 0.220,  0.0, 0.0,  0.0, 0.0, true,true, 0.1 },
-      { /*全段*/     0.220, 0.253,  -7.0, 00.0, 0.0, 0.0, true,true, 0.1 },
-
-
-      { /*全段*/     0.291, 0.31,  0.0, 0.0,  0.0, 0.0, true,true, 0.1 },
-
-        { /*全段*/     0.31, 1.0,  0.0, 0.0,  0.0, 0.0, true,true, 0.1 },
-
-
-      };
-
-    // 不再弹出“保存为”对话框，直接锁定到输入同目录
-    const QString inPath = ui->targetCloudFilePath->text().trimmed();
-    if (inPath.isEmpty()) {
-        QMessageBox::warning(this, "提示", "请先选择输入点云文件。");
-        return;
-    }
-    QFileInfo inFi(inPath);
-    QDir outDir = inFi.absoluteDir();
-    if (!outDir.exists()) outDir.mkpath(".");         // 保险：确保目录存在
-    const QString out = outDir.filePath("cloud_processed.txt");
-
-    // 调用处理
-    bool ok = processCloudWithYZGroups(inPath,
-                                       out,
-                                       groups,          // 你的分段配置
-                                       /*applyXShift=*/false,
-                                       /*fps=*/20.0,
-                                       /*defaultSpeedMps=*/0.10);
-    if (ok) {
-        QMessageBox mb(this);
-        mb.setWindowTitle("完成");
-        mb.setText("已输出处理后点云：\n" + out);
-        mb.setIcon(QMessageBox::Information);
-        mb.setWindowFlag(Qt::WindowStaysOnTopHint, true);
-        mb.exec();
-    } else {
-        QMessageBox::warning(this, "失败", "处理失败，请检查输入文件格式。");
-    }
-}
-
-// ====== 主处理：把原始点云 -> 应用分段 Y/Z 偏移(+可选X推进) -> 写出 ======
-bool MainWindow::processCloudWithYZGroups(const QString& inPath,
-                                          const QString& outPath,
-                                          const std::vector<YZOffsetGroup>& groups,
-                                          bool applyXShift,
-                                          double fps,
-                                          double defaultSpeedMps)
-{
-    QFile fin(inPath);
-    if (!fin.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, "错误", "无法打开输入点云文件");
-        return false;
-    }
-    QTextStream tin(&fin);
-    tin.setCodec("UTF-8");
-
-    // ===== 第1遍：预读统计有效点数 =====
-    int validCount = 0;
-    {
-        QString line;
-        while (tin.readLineInto(&line)) {
-            float x,y,z; QStringList toks; QChar delim;
-            if (parseXYZLine(line, x,y,z, toks, delim))
-                ++validCount;
-        }
-    }
-    if (validCount <= 0) {
-        fin.close();
-        QMessageBox::information(this, "提示", "文件中未解析到有效点");
-        return false;
-    }
-
-    // 把输入流/文件指针回到开头，准备第2遍读取
-    if (!fin.seek(0)) { // 让底层 QIODevice 回到起始
-        fin.close();
-        QMessageBox::warning(this, "错误", "无法重定位到文件开头");
-        return false;
-    }
-    tin.seek(0);        // 让 QTextStream 的内部游标也回到起始
-
-    // ===== 打开输出（覆盖写） =====
-    QFile fout(outPath);
-    if (!fout.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
-        fin.close();
-        QMessageBox::warning(this, "错误", "无法创建输出点云文件");
-        return false;
-    }
-    QTextStream tout(&fout);
-    tout.setCodec("UTF-8");
-
-    // ===== 单位换算：速度 m/s -> 每点 mm（若开启 X 推进时用）=====
-    const double frameDt = 1.0 / std::max(1.0, fps);     // s/点（把每一“记录”当作一帧）
-    const double MPS_TO_MM_PER_POINT = 1000.0 * frameDt;  // m/s -> mm/点
-    double disInterMm = 0.0;
-
-    // ===== 第2遍：读取->计算->写出 =====
-    QString line;
-    int idx = 0;
-    int processed = 0;
-    while (tin.readLineInto(&line)) {
-        float x,y,z; QStringList toks; QChar delim;
-        if (!parseXYZLine(line, x,y,z, toks, delim)) {
-            // 非点行原样回写
-            tout << line << '\n';
-            continue;
-        }
-
-        const double frac = (validCount > 1)
-                                ? double(idx) / double(validCount - 1)
-                                : 0.0;
-
-        double yMm=0.0, zMm=0.0, speedMps=defaultSpeedMps;
-        sampleYZandSpeed(frac, groups, yMm, zMm, speedMps, defaultSpeedMps);
-
-        // 应用偏移（点云单位=mm）
-        x += (applyXShift ? static_cast<float>(disInterMm) : 0.0f);
-        y += static_cast<float>(yMm);
-        z += static_cast<float>(zMm);
-
-        tout << rebuildLine(x,y,z, toks, delim) << '\n';
-
-        if (applyXShift) {
-            disInterMm += speedMps * MPS_TO_MM_PER_POINT; // mm 累计
-        }
-
-        ++idx; ++processed;
-        if ((processed % 200000) == 0) qApp->processEvents();
-    }
-
-    fin.close();
-    fout.close();
-    return true;
-
-}
-
-void MainWindow::on_selectPoint_clicked()
-{
-
-}
-
-
-void MainWindow::on_selectPoint_toggled(bool checked)
+void MainWindow::on_CurveStretching_toggled(bool checked)
 {
     ui->openGLWidget->pickingEnabled=checked;
+    if(!checked)
+    {ui->openGLWidget->clearSelection();}
+}
+
+
+void MainWindow::on_Swing_toggled(bool checked)
+{
+    ui->openGLWidget->pickingEnabled_swing =checked;
+}
+
+
+void MainWindow::on_selectCloudOutPath_2_clicked()
+{
+    QString  thisDirPath = QFileDialog::getExistingDirectory( this, "Rec path", "/");
+    if (thisDirPath.isEmpty())
+    {
+        return;
+    }
+    else
+    {
+        ui->lineEdit->setText(thisDirPath);
+
+    }
+}
+
+
+void MainWindow::on_pushButton_clicked()
+{
+    ui->openGLWidget->saveAfterprocessTxt(ui->lineEdit->text());
 }
 

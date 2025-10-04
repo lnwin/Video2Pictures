@@ -16,7 +16,11 @@
 #include <QLocale>
 #include <vector>
 #include "myStruct.h" // 假定定义了 struct PcdPoint {float x, y, z, intensity; ...};
-
+#include <QSaveFile>
+#include <QDir>
+#include <QFileInfo>
+#include <QMessageBox>
+#include <QLocale>
 
 class cloudRender : public QOpenGLWidget, protected QOpenGLFunctions_4_0_Core
 {
@@ -31,6 +35,11 @@ public:
 
 
      bool pickingEnabled = false;
+     bool pickingEnabled_swing = false;
+
+
+     void  clearSelection();                      // 清除绿色高亮与已选点
+      void saveAfterprocessTxt(const QString& dirPath);
 signals:
     void sendUpdateSIG();
     void saveMyCloud_openGL(std::vector<PcdPoint>);
@@ -158,13 +167,13 @@ private:
     int   findClosestIndex(const QVector3D& rayOrigin, const QVector3D& rayDir);
     void  rebuildSortByXAndRanks();              // 根据 pointCloud 重建排序与 rank
     void  applySelectionFrom3Picked();           // 由 3 个 pickedIdx 计算区间并更新 selectMask
-    void  clearSelection();                      // 清除绿色高亮与已选点
+
 
     // —— 键盘驱动对选中区间做位移 —— //
     bool haveSelection = false;     // 记录当前是否有一个有效选中区间
     int  selRmin = -1, selRmax = -1;// 选中区间在“按X排序后的名次”范围 [rmin,rmax]
-    float stepY = 5.0f;             // ← 每次按键对 Y 的基本位移（mm）
-    float stepZ = 5.0f;             // ← 每次按键对 Z 的基本位移（mm）
+    float stepY = 1.0f;             // ← 每次按键对 Y 的基本位移（mm）
+    float stepZ = 1.0f;             // ← 每次按键对 Z 的基本位移（mm）
 
 
 
