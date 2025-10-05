@@ -585,3 +585,14 @@ void MainWindow::on_radioButton_toggled(bool checked)
     {ui->openGLWidget->clearSelection();}
 }
 
+
+
+
+
+void MainWindow::on_radioButton_2_toggled(bool checked)
+{
+    ui->openGLWidget->pickEnabled_stretchX =checked;
+    if(!checked)
+    {ui->openGLWidget->clearSelection();}
+}
+

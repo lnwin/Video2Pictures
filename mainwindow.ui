@@ -293,6 +293,13 @@
                 </widget>
                </item>
                <item>
+                <widget class="QRadioButton" name="radioButton_2">
+                 <property name="text">
+                  <string>局部拉伸X</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
                 <widget class="QRadioButton" name="CurveStretching">
                  <property name="text">
                   <string>曲线拉伸点云</string>

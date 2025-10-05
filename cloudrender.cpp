@@ -214,7 +214,7 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton) {
 
         // —— 新增：选点模式 —— //
-        if (pickingEnabled || pickingEnabled_swing||pickEnabled_all) {
+        if (pickingEnabled || pickingEnabled_swing||pickEnabled_all|| pickEnabled_stretchX) {
             float x = (2.0f * event->x()) / width() - 1.0f;
             float y = 1.0f - (2.0f * event->y()) / height();
             QVector3D rayStart = unproject(x, y, 0.0f);
@@ -549,17 +549,75 @@ void cloudRender::clearSelection()
 
 void cloudRender::keyPressEvent(QKeyEvent *event)
 {
-    // 三个模式都关：不响应
-    if (!pickingEnabled && !pickingEnabled_swing && !pickEnabled_all) {
+    // 四种模式都关：不响应
+    if (!pickingEnabled && !pickingEnabled_swing && !pickEnabled_all && !pickEnabled_stretchX) {
         QOpenGLWidget::keyPressEvent(event);
         return;
     }
-
     if (!haveSelection || pointCloud.empty() || selRmin < 0 || selRmax < selRmin) {
         QOpenGLWidget::keyPressEvent(event);
         return;
     }
 
+    const int rmin = selRmin, rmax = selRmax;
+    const int Nsel = rmax - rmin + 1;
+    if (Nsel <= 0) return;
+
+    // ===== 新增：X轴拉伸（键盘触发），优先级最高 =====
+    if (pickEnabled_stretchX && (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right)) {
+        // 计算拉伸增量：右=扩张，左=收缩
+        float k = (event->key() == Qt::Key_Right ? +stretchXStep : -stretchXStep);
+        float mul = 1.0f;
+        if (event->modifiers() & Qt::ShiftModifier)  mul *= 10.0f;
+        if (event->modifiers() & Qt::ControlModifier) mul *= 0.1f;
+        k *= mul;
+
+        const int Ntotal = static_cast<int>(sortedIdxByX.size());
+        if (Ntotal <= 0) return;
+
+        // 以选区左端点作为锚点：xmin = X(rmin)
+        const int idxMin = sortedIdxByX[rmin];
+        const int idxMax = sortedIdxByX[rmax];
+        const float xmin = pointCloud[idxMin][0];
+        const float oldX_rmax = pointCloud[idxMax][0];
+
+        // 1) 选区内线性拉伸：rmin 不动，rmax 权重1，其它点 0..1
+        for (int r = rmin; r <= rmax; ++r) {
+            int idx = sortedIdxByX[r];
+            float& x = pointCloud[idx][0];
+            float w  = (Nsel > 1) ? float(r - rmin) / float(Nsel - 1) : 1.0f; // 0..1
+            float scale = 1.0f + k * w;   // 允许微收缩/扩张
+            x = xmin + (x - xmin) * scale;
+        }
+
+        // 2) 尾部跟随：r>rmax 的点等量平移 deltaMax
+        const float newX_rmax = pointCloud[idxMax][0];
+        const float deltaMax  = newX_rmax - oldX_rmax;
+        if (deltaMax != 0.0f) {
+            for (int r = rmax + 1; r < Ntotal; ++r) {
+                int idx = sortedIdxByX[r];
+                pointCloud[idx][0] += deltaMax;
+            }
+        }
+
+        // 3) X 变了：重建排序/名次，并把选区“绑在同一对端点”上
+        rebuildSortByXAndRanks();
+        selRmin = rankOfIndex[idxMin];
+        selRmax = rankOfIndex[idxMax];
+
+        // 4) 重新染色选区（只保留原选区高亮；尾部跟随不染色，如需也染色可一起置1）
+        std::fill(selectMask.begin(), selectMask.end(), 0.0f);
+        if (selRmin >= 0 && selRmax >= selRmin) {
+            for (int r = selRmin; r <= selRmax; ++r)
+                selectMask[ sortedIdxByX[r] ] = 1.0f;
+            haveSelection = true;
+        } else haveSelection = false;
+
+        update();
+        return; // 已处理
+    }
+
+    // ===== 其余：按你原来的 Y/Z 位移逻辑 =====
     float dY = 0.0f, dZ = 0.0f;
     switch (event->key()) {
     case Qt::Key_Left:  dY = -stepY; break;
@@ -570,46 +628,57 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
         QOpenGLWidget::keyPressEvent(event);
         return;
     }
-
     float mul = 1.0f;
     if (event->modifiers() & Qt::ShiftModifier)  mul *= 10.0f;
     if (event->modifiers() & Qt::ControlModifier) mul *= 0.1f;
     dY *= mul; dZ *= mul;
 
-    const int rmin = selRmin, rmax = selRmax;
-    const int Nsel = rmax - rmin + 1;
-    if (Nsel <= 0) return;
+    const int Ntotal = static_cast<int>(sortedIdxByX.size());
 
-    for (int r = rmin; r <= rmax; ++r) {
-        int idx = sortedIdxByX[r];
-        float w = 0.0f;
-        if (pickEnabled_all) {
-            // —— 新增：整体平移 —— //
-            w = 1.0f;                    // 区间内所有点同等位移
+    if (pickEnabled_all) {
+        // 整体等量：仅选区
+        for (int r = rmin; r <= rmax; ++r) {
+            int idx = sortedIdxByX[r];
+            pointCloud[idx][1] += dY;   // Y
+            pointCloud[idx][2] += dZ;   // Z
         }
-        else if (pickingEnabled_swing) {
-            // —— 线性递增：rmin→0, rmax→1 —— //
-            w = (Nsel > 1) ? float(r - rmin) / float(Nsel - 1) : 1.0f;
+    }
+    else if (pickingEnabled_swing) {
+        // 摆尾：选区内线性(0→1)，r>rmax 尾部全部按最大(=1)跟随
+        // 1) 选区内：线性权重
+        for (int r = rmin; r <= rmax; ++r) {
+            int idx = sortedIdxByX[r];
+            float w = (Nsel > 1) ? float(r - rmin) / float(Nsel - 1) : 1.0f; // 0..1
+            pointCloud[idx][1] += dY * w;  // Y
+            pointCloud[idx][2] += dZ * w;  // Z
         }
-        else if (pickingEnabled) {
-            // —— Hann 窗：中间最大、边缘 0 —— //
+        // 2) 尾部：等量跟随（权重=1）
+        for (int r = rmax + 1; r < Ntotal; ++r) {
+            int idx = sortedIdxByX[r];
+            pointCloud[idx][1] += dY;      // Y
+            pointCloud[idx][2] += dZ;      // Z
+        }
+    }
+    else if (pickingEnabled) {
+        // Hann 窗：中间最大，边缘为 0（仅选区）
+        for (int r = rmin; r <= rmax; ++r) {
+            int idx = sortedIdxByX[r];
+            float w;
             if (Nsel > 1) {
                 float arg = 2.0f * float(M_PI) * float(r - rmin) / float(Nsel - 1);
                 w = 0.5f * (1.0f - std::cos(arg));
             } else {
                 w = 1.0f;
             }
-        } else {
-            // 理论到不了这里（上面已 return），留作安全兜底
-            w = 0.0f;
+            pointCloud[idx][1] += dY * w;  // Y
+            pointCloud[idx][2] += dZ * w;  // Z
         }
-        // 只改 Y/Z
-        pointCloud[idx][1] += dY * w;
-        pointCloud[idx][2] += dZ * w;
     }
 
     update();
+
 }
+
 void cloudRender::saveAfterprocessTxt(const QString& dirPath)
 {
     // 1) 校验点云

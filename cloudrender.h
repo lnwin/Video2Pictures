@@ -37,6 +37,8 @@ public:
      bool pickingEnabled = false;
      bool pickingEnabled_swing = false;
      bool pickEnabled_all = false;
+     bool pickEnabled_stretchX = false;   // 新增：X拉伸 + 尾部跟随
+     float stretchXStep = 0.02f;          // 每次按键的拉伸系数增量（2%）
 
      void  clearSelection();                      // 清除绿色高亮与已选点
       void saveAfterprocessTxt(const QString& dirPath);
