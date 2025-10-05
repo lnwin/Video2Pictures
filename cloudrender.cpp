@@ -214,7 +214,7 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton) {
 
         // —— 新增：选点模式 —— //
-        if (pickingEnabled || pickingEnabled_swing) {
+        if (pickingEnabled || pickingEnabled_swing||pickEnabled_all) {
             float x = (2.0f * event->x()) / width() - 1.0f;
             float y = 1.0f - (2.0f * event->y()) / height();
             QVector3D rayStart = unproject(x, y, 0.0f);
@@ -228,7 +228,7 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
                     pickedIdx.push_back(idx);
                 }
                 // 收够 3 个：计算并涂色
-                if (pickedIdx.size() == 3) {
+                if (pickedIdx.size() == 2) {
                     // 排序信息若还没准备好，这里保证一下
                     if (rankOfIndex.size() != pointCloud.size()) {
                         rebuildSortByXAndRanks();
@@ -507,15 +507,15 @@ void cloudRender::rebuildSortByXAndRanks()
 void cloudRender::applySelectionFrom3Picked()
 {
     const int N = (int)pointCloud.size();
-    if (N == 0 || pickedIdx.size() < 3) return;
+    if (N == 0 || pickedIdx.size() < 2) return;
     if ((int)rankOfIndex.size() != N) rebuildSortByXAndRanks();
 
     int r0 = rankOfIndex[pickedIdx[0]];
     int r1 = rankOfIndex[pickedIdx[1]];
-    int r2 = rankOfIndex[pickedIdx[2]];
+   // int r2 = rankOfIndex[pickedIdx[2]];
 
-    int rmin = std::min(r0, std::min(r1, r2));
-    int rmax = std::max(r0, std::max(r1, r2));
+    int rmin = std::min(r0, std::min(r0, r1));
+    int rmax = std::max(r0, std::max(r0, r1));
 
     // 百分比仅用于显示/记录（选中集合实际等价于 rank 区间）
     // float pmin = (N>1) ? (float)rmin / (float)(N-1) : 0.0f;
@@ -549,8 +549,8 @@ void cloudRender::clearSelection()
 
 void cloudRender::keyPressEvent(QKeyEvent *event)
 {
-    // 如果两个模式都关闭，不响应任何键盘事件
-    if ((!pickingEnabled) && (!pickingEnabled_swing)) {
+    // 三个模式都关：不响应
+    if (!pickingEnabled && !pickingEnabled_swing && !pickEnabled_all) {
         QOpenGLWidget::keyPressEvent(event);
         return;
     }
@@ -582,26 +582,27 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
 
     for (int r = rmin; r <= rmax; ++r) {
         int idx = sortedIdxByX[r];
-        float w = 1.0f;
-
-        if (pickingEnabled_swing) {
-            // —— 线性权重 ——
-            if (Nsel > 1) w = float(r - rmin) / float(Nsel - 1);
-            else          w = 1.0f;
+        float w = 0.0f;
+        if (pickEnabled_all) {
+            // —— 新增：整体平移 —— //
+            w = 1.0f;                    // 区间内所有点同等位移
+        }
+        else if (pickingEnabled_swing) {
+            // —— 线性递增：rmin→0, rmax→1 —— //
+            w = (Nsel > 1) ? float(r - rmin) / float(Nsel - 1) : 1.0f;
         }
         else if (pickingEnabled) {
-            // —— Hann 窗权重 ——
+            // —— Hann 窗：中间最大、边缘 0 —— //
             if (Nsel > 1) {
                 float arg = 2.0f * float(M_PI) * float(r - rmin) / float(Nsel - 1);
                 w = 0.5f * (1.0f - std::cos(arg));
             } else {
                 w = 1.0f;
             }
+        } else {
+            // 理论到不了这里（上面已 return），留作安全兜底
+            w = 0.0f;
         }
-        else {
-            w = 0.0f; // 两个都 false 的情况不会到这里，因为上面 return 了
-        }
-
         // 只改 Y/Z
         pointCloud[idx][1] += dY * w;
         pointCloud[idx][2] += dZ * w;

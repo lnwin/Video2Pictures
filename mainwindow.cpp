@@ -571,3 +571,17 @@ void MainWindow::on_pushButton_clicked()
     ui->openGLWidget->saveAfterprocessTxt(ui->lineEdit->text());
 }
 
+
+void MainWindow::on_pushButton_2_clicked()
+{
+    ui->openGLWidget->b2C_openGL();
+}
+
+
+void MainWindow::on_radioButton_toggled(bool checked)
+{
+    ui->openGLWidget->pickEnabled_all =checked;
+    if(!checked)
+    {ui->openGLWidget->clearSelection();}
+}
+

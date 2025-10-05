@@ -36,7 +36,7 @@ public:
 
      bool pickingEnabled = false;
      bool pickingEnabled_swing = false;
-
+     bool pickEnabled_all = false;
 
      void  clearSelection();                      // 清除绿色高亮与已选点
       void saveAfterprocessTxt(const QString& dirPath);
