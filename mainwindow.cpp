@@ -371,20 +371,35 @@ static bool loadTxtAndFeedToViewer(const QString& path,
         qWarning() << "[loadTxt] open failed:" << path;
         return false;
     }
+
     QTextStream ts(&f);
     ts.setCodec("UTF-8");
-    ts.setLocale(QLocale::c());   // 关键！支持科学计数法，使用 '.' 小数点
+    ts.setLocale(QLocale::c());   // 支持科学计数法 & '.' 小数点
 
-    // 先一遍扫描：统计 min/max（用于可选归一化）
+    // === 进度条弹窗 ===
+    QProgressDialog dlg(QObject::tr("扫描点云(1/2)…"), QObject::tr("取消"),
+                        0, 0, viewer);  // 0,0 => 不定进度
+    dlg.resize(600, 120);  // 调整窗口尺寸
+    dlg.setWindowTitle(QObject::tr("正在扫描点云数据"));
+    dlg.setWindowModality(Qt::ApplicationModal);
+    dlg.setMinimumDuration(0);          // 立即显示
+    dlg.setAutoClose(false);
+    dlg.setAutoReset(false);
+
+    // 第1遍：统计 min/max
     bool first = true;
     float minZ=0.f, maxZ=0.f, minI=0.f, maxI=0.f;
     bool hasAnyIntensity = false;
 
-    // 为了不二次读取整文件到内存，这里先简单地重读两遍文件（一次求范围，一次喂数据）。
-    // 如果不想两遍读：可以先不归一化，直接喂；或边读边分块缓存做局部归一化（略复杂）。
+    // 可选：计时 & 节流更新
+    QElapsedTimer tick; tick.start();
+    const int UI_UPDATE_MS = 50; // 每 50ms 刷新一次 UI
+
     {
         QString line;
         while (ts.readLineInto(&line)) {
+            if (dlg.wasCanceled()) { f.close(); return false; }
+
             PcdPoint p;
             if (!parsePcdLine(line, p)) continue;
 
@@ -398,13 +413,37 @@ static bool loadTxtAndFeedToViewer(const QString& path,
             }
             if (std::isfinite(p.intensity) && std::fabs(p.intensity) > 1e-12f)
                 hasAnyIntensity = true;
+
+            if (tick.elapsed() > UI_UPDATE_MS) {
+                qApp->processEvents();
+                tick.restart();
+            }
         }
     }
-    f.seek(0);  // 回到开头再读一遍
+
+    // 重置到文件开头
+    f.seek(0);
     ts.seek(0);
 
+    // 统计总行数（用于确定进度条最大值）
+    // 如果你不想再循环一次数行，可在上面扫描时顺便计数保存下来。
+    qint64 totalLines = 0;
+    {
+        QString line;
+        while (ts.readLineInto(&line)) { ++totalLines; }
+    }
+    f.seek(0);
+    ts.seek(0);
+
+    // 切换为确定进度
+    dlg.setWindowTitle(QObject::tr("正在加载点云数据"));
+
+    dlg.setLabelText(QObject::tr("加载点云(2/2)…"));
+    dlg.setRange(0, int(totalLines));
+    dlg.setValue(0);
+
     std::vector<PcdPoint> batch;
-    batch.reserve(std::min(batchSize, 800000)); // 预留一点
+    batch.reserve(std::min(batchSize, 800000));
 
     const bool doI = normalizeIntensity && hasAnyIntensity && (std::fabs(maxI - minI) > 1e-6f);
     const bool doZ = normalizeIntensity && !hasAnyIntensity && (std::fabs(maxZ - minZ) > 1e-6f);
@@ -413,17 +452,30 @@ static bool loadTxtAndFeedToViewer(const QString& path,
 
     QString line;
     qint64 total = 0;
+    qint64 lineNo = 0;
+    tick.restart();
+
     while (ts.readLineInto(&line)) {
+        if (dlg.wasCanceled()) { f.close(); return false; }
+
+        ++lineNo;
+
         PcdPoint p;
-        if (!parsePcdLine(line, p)) continue;
+        if (!parsePcdLine(line, p)) {
+            // 也要推进进度
+            if (tick.elapsed() > UI_UPDATE_MS) {
+                dlg.setValue(int(lineNo));
+                qApp->processEvents();
+                tick.restart();
+            }
+            continue;
+        }
 
         if (normalizeIntensity) {
             if (doI) {
                 p.intensity = std::clamp((p.intensity - minI) * invI, 0.0f, 1.0f);
             } else if (doZ) {
                 p.intensity = std::clamp((p.z - minZ) * invZ, 0.0f, 1.0f);
-            } else {
-                // 没有可归一化的范围，保持原值（可能全 0）
             }
         }
 
@@ -433,8 +485,19 @@ static bool loadTxtAndFeedToViewer(const QString& path,
         if ((int)batch.size() >= batchSize) {
             viewer->getCloud2Show(batch);
             batch.clear();
-            // 可选：让事件循环喘口气（避免 UI 假死）
-            qApp->processEvents();
+            // 更新 UI
+            if (tick.elapsed() > UI_UPDATE_MS) {
+                dlg.setValue(int(lineNo));
+                qApp->processEvents();
+                tick.restart();
+            }
+        } else {
+            // 也周期性刷新 UI
+            if (tick.elapsed() > UI_UPDATE_MS) {
+                dlg.setValue(int(lineNo));
+                qApp->processEvents();
+                tick.restart();
+            }
         }
     }
 
@@ -444,12 +507,18 @@ static bool loadTxtAndFeedToViewer(const QString& path,
     }
 
     f.close();
+
+    dlg.setValue(int(totalLines)); // 收尾
+    dlg.close();
+
     qDebug() << "[loadTxt] fed points =" << total << "file =" << path;
-    // 可选：让视角回到中心（如你已有 b2C_openGL）
+
+    // 可选：回中
     viewer->b2C_openGL();
 
     return (total > 0);
 }
+
 
 void MainWindow::on_readCloudFile_clicked()
 {

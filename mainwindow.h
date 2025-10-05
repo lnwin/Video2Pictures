@@ -10,6 +10,10 @@
 #include <myprocess.h>
 #include <reconstruction.h>
 #include <QVector3D>
+#include <QProgressDialog>
+#include <QApplication>
+#include <QElapsedTimer>
+
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
