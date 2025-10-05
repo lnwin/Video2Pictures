@@ -326,43 +326,36 @@ static inline QStringList splitFlexible(const QString& s) {
 
 // 解析一行：xyz 必须；强度、时间戳可选
 // 返回 true 表示成功，并填充 out
-static bool parsePcdLine(const QString& line, PcdPoint& out) {
-    const QString s = line.trimmed();
-    if (s.isEmpty()) return false;
-    if (s.startsWith('#') || s.startsWith("//")) return false; // 注释行
+static bool parsePcdLine(const QString& line, PcdPoint& p)
+{
+    QString s = line.trimmed();
+    if (s.isEmpty() || s.startsWith('#')) return false;
 
-    const QStringList parts = splitFlexible(s);
-    if (parts.size() < 3) return false;
+    // 统一把逗号替换为空格，然后按空白切分
+    s.replace(',', ' ');
+    const QStringList toks = s.split(QRegularExpression("\\s+"),
+                                     Qt::SkipEmptyParts);
+    if (toks.size() < 3) return false;
 
-    bool okx=false, oky=false, okz=false;
-    float x = parts[0].toFloat(&okx);
-    float y = parts[1].toFloat(&oky);
-    float z = parts[2].toFloat(&okz);
-    if (!(okx && oky && okz)) return false;
+    const QLocale c = QLocale::c(); // C locale，支持科学计数法 & '.' 小数点
+    bool okx=false, oky=false, okz=false, oki=true;
 
-    float intensity = 0.0f;
-    quint64 ts_ms = 0;
+    p.x = c.toFloat(toks[0], &okx);
+    p.y = c.toFloat(toks[1], &oky);
+    p.z = c.toFloat(toks[2], &okz);
 
-    if (parts.size() >= 4) {
-        // 第4列优先按强度解析（浮点），失败就按整型时间戳解析
-        bool okI=false; float I = parts[3].toFloat(&okI);
-        if (okI) {
-            intensity = I;
-            if (parts.size() >= 5) {
-                bool okt=false; quint64 t = parts[4].toULongLong(&okt);
-                if (okt) ts_ms = t;
-            }
-        } else {
-            bool okt=false; quint64 t = parts[3].toULongLong(&okt);
-            if (okt) ts_ms = t;
-        }
+    // 强度可选：有就解析，没有置 0
+    if (toks.size() >= 4) {
+        p.intensity = c.toFloat(toks[3], &oki);
+    } else {
+        p.intensity = 0.0f;
+        oki = true;
     }
 
-    out.x = x; out.y = y; out.z = z;
-    out.intensity = intensity;  // 保留原值（是否归一化交给渲染侧）
-    out.ts_ms = ts_ms;
-    return true;
+    return okx && oky && okz && oki && std::isfinite(p.x) && std::isfinite(p.y)
+           && std::isfinite(p.z) && std::isfinite(p.intensity);
 }
+
 
 // 读取文件并按批量调用 viewer->getCloud2Show(batch)
 // normalizeIntensity=true 时，会把强度归一化到 [0,1]（若文件无强度，则按 Z 归一化）
@@ -380,6 +373,7 @@ static bool loadTxtAndFeedToViewer(const QString& path,
     }
     QTextStream ts(&f);
     ts.setCodec("UTF-8");
+    ts.setLocale(QLocale::c());   // 关键！支持科学计数法，使用 '.' 小数点
 
     // 先一遍扫描：统计 min/max（用于可选归一化）
     bool first = true;
@@ -453,6 +447,7 @@ static bool loadTxtAndFeedToViewer(const QString& path,
     qDebug() << "[loadTxt] fed points =" << total << "file =" << path;
     // 可选：让视角回到中心（如你已有 b2C_openGL）
     viewer->b2C_openGL();
+
     return (total > 0);
 }
 
@@ -466,6 +461,11 @@ void MainWindow::on_readCloudFile_clicked()
     if (!loadTxtAndFeedToViewer(cloudfileName, ui->openGLWidget, /*normalizeIntensity=*/true, /*batchSize=*/200000)) {
         QMessageBox::warning(this, tr("读取失败"), cloudfileName);
     }
+    else
+    {
+        QMessageBox::information(this, tr("完成"), tr("读取点云成功！"));
+    }
+
 
 
 }
