@@ -179,6 +179,12 @@ private:
     int  selRmin = -1, selRmax = -1;// 选中区间在“按X排序后的名次”范围 [rmin,rmax]
     float stepY = 1.0f;             // ← 每次按键对 Y 的基本位移（mm）
     float stepZ = 1.0f;             // ← 每次按键对 Z 的基本位移（mm）
+    QOpenGLShaderProgram* overlayProgram = nullptr;
+    GLuint overlayVao = 0, overlayVbo = 0;
+
+    inline bool hasIndex(int i) const {
+        return i >= 0 && i < (int)pointCloud.size();
+    }
 
 
 

@@ -48,6 +48,40 @@ void cloudRender::initializeGL()
     updateCamera();                     // 内部用 m_rot + m_worldUp
     intensityMin =  std::numeric_limits<float>::infinity();
     intensityMax = -std::numeric_limits<float>::infinity();
+
+
+
+            // ---- overlay program: 固定红色 ----
+            static const char* ovVert = R"(
+                #version 330 core
+                layout (location = 0) in vec3 aPos;
+                uniform mat4 projection;
+                uniform mat4 view;
+                void main(){
+                    gl_Position = projection * view * vec4(aPos, 1.0);
+                }
+        )";
+            static const char* ovFrag = R"(
+                #version 330 core
+                out vec4 FragColor;
+                void main(){
+                    FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+                }
+        )";
+
+            overlayProgram = new QOpenGLShaderProgram(this);
+            overlayProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, ovVert);
+            overlayProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, ovFrag);
+            overlayProgram->link();
+
+            glGenVertexArrays(1, &overlayVao);
+            glBindVertexArray(overlayVao);
+            glGenBuffers(1, &overlayVbo);
+            glBindBuffer(GL_ARRAY_BUFFER, overlayVbo);
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float)*3, (void*)0);
+            glEnableVertexAttribArray(0);
+            glBindVertexArray(0);
+
 }
 
 void cloudRender::paintGL()
@@ -95,6 +129,47 @@ void cloudRender::paintGL()
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
     program->release();
+
+    // ---- overlay: 画测距点和直线 ----
+    if (pickEnabled_distance) {
+        // 收集要画的点
+        std::vector<float> ov; ov.reserve(6);
+        bool hasA = hasIndex(distIdxA);
+        bool hasB = hasIndex(distIdxB);
+
+        if (hasA) {
+            const auto& p = pointCloud[distIdxA];
+            ov.insert(ov.end(), {p[0], p[1], p[2]});
+        }
+        if (hasB) {
+            const auto& p = pointCloud[distIdxB];
+            ov.insert(ov.end(), {p[0], p[1], p[2]});
+        }
+
+        if (!ov.empty()) {
+            overlayProgram->bind();
+            overlayProgram->setUniformValue("projection", projection);
+            overlayProgram->setUniformValue("view", view);
+
+            glBindVertexArray(overlayVao);
+            glBindBuffer(GL_ARRAY_BUFFER, overlayVbo);
+            glBufferData(GL_ARRAY_BUFFER, ov.size()*sizeof(float), ov.data(), GL_DYNAMIC_DRAW);
+
+            // 画点（尺寸=3）
+            glPointSize(10.0f);
+            glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(ov.size()/3));
+
+            // 若两点都存在，画连接线
+            if (hasA && hasB) {
+                glLineWidth(5.0f);            // 可调
+                glDrawArrays(GL_LINES, 0, 2); // 两个端点一条线
+            }
+
+            glBindVertexArray(0);
+            overlayProgram->release();
+        }
+    }
+
 }
 
 
@@ -229,35 +304,34 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
             int idx = findClosestIndex(rayStart, rayDir);
             if (idx >= 0) {
                 if (distPickCount == 0) {
+                    // 第一次点击：记录 A，清掉旧的 B，并立刻重绘（画出红点）
                     distIdxA = idx;
+                    distIdxB = -1;        // 避免遗留连线
                     distPickCount = 1;
-                    // 可选：给第一点上色或高亮
+                    update();             // ← 立刻触发 paintGL() 画红点
                 } else {
+                    // 第二次点击：记录 B、计算距离、弹窗；保持 A/B 以显示红线
                     distIdxB = idx;
-                    distPickCount = 0; // 重置，方便下一次测距
+                    distPickCount = 0;    // 让下一次两点测距从头开始
 
-                    // 计算距离并弹窗
-                    const float d = euclid3(pointCloud[distIdxA], pointCloud[distIdxB]); // 单位：你的点云单位（看起来是 mm）
-                    // 同时展示米（假设你的单位是 mm；若是 m，请把 /1000 去掉或改成 *1000）
-                    const double d_m = d / 1000.0;
+                    const float d = euclid3(pointCloud[distIdxA], pointCloud[distIdxB]);
+                    const double d_m = d / 1000.0; // 如果你的单位是 mm；如是 m 请改掉这行
 
                     QMessageBox msg(this);
                     msg.setWindowTitle(tr("两点测距"));
                     msg.setIcon(QMessageBox::Information);
                     msg.setText(tr("点 A: #%1\n点 B: #%2\n距离: %3 (单位)\n≈ %4 m")
-                                    .arg(distIdxA)
-                                    .arg(distIdxB)
-                                    .arg(d, 0, 'f', 3)      // 3位小数，可调
-                                    .arg(d_m, 0, 'f', 3));  // 假设原单位mm
+                                    .arg(distIdxA).arg(distIdxB)
+                                    .arg(d, 0, 'f', 3).arg(d_m, 0, 'f', 3));
                     msg.addButton(QMessageBox::Ok);
                     msg.exec();
 
-                    // 可选：清除高亮
-                    // distIdxA = distIdxB = -1;
+                    update(); // 第二点选完也重绘（红线出现）
                 }
             }
-            return; // 左键在测距模式下已处理
+            return; // 左键事件已处理
         }
+
 
         // —— ② 你的“选点选区/摆尾/整体”等模式 —— //
         if (pickingEnabled || pickingEnabled_swing || pickEnabled_all || pickEnabled_stretchX) {
