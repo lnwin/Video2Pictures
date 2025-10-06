@@ -39,9 +39,12 @@ public:
      bool pickEnabled_all = false;
      bool pickEnabled_stretchX = false;   // 新增：X拉伸 + 尾部跟随
      float stretchXStep = 0.02f;          // 每次按键的拉伸系数增量（2%）
+     bool pickEnabled_distance = false;
 
      void  clearSelection();                      // 清除绿色高亮与已选点
       void saveAfterprocessTxt(const QString& dirPath);
+     int  distPickCount = 0;              // 已选点计数（0/1）
+     int  distIdxA = -1, distIdxB = -1;   // 两个被选点的索引
 signals:
     void sendUpdateSIG();
     void saveMyCloud_openGL(std::vector<PcdPoint>);
@@ -176,6 +179,7 @@ private:
     int  selRmin = -1, selRmax = -1;// 选中区间在“按X排序后的名次”范围 [rmin,rmax]
     float stepY = 1.0f;             // ← 每次按键对 Y 的基本位移（mm）
     float stepZ = 1.0f;             // ← 每次按键对 Z 的基本位移（mm）
+
 
 
 

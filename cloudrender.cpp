@@ -207,14 +207,19 @@ QVector3D cloudRender::findClosestPoint(const QVector3D& rayOrigin, const QVecto
     }
     return (minDist < searchRadius) ? closest : QVector3D();
 }
+static inline float euclid3(const cv::Vec4f& a, const cv::Vec4f& b){
+    const float dx = a[0]-b[0], dy = a[1]-b[1], dz = a[2]-b[2];
+    return std::sqrt(dx*dx + dy*dy + dz*dz);
+}
 
 void cloudRender::mousePressEvent(QMouseEvent *event)
 {
     lastMousePos = QVector2D(event->pos());
     if (event->button() == Qt::LeftButton) {
 
-        // —— 新增：选点模式 —— //
-        if (pickingEnabled || pickingEnabled_swing||pickEnabled_all|| pickEnabled_stretchX) {
+        // —— ① 测距模式优先 —— //
+        if (pickEnabled_distance) {
+            // 投射光线→找最近点索引
             float x = (2.0f * event->x()) / width() - 1.0f;
             float y = 1.0f - (2.0f * event->y()) / height();
             QVector3D rayStart = unproject(x, y, 0.0f);
@@ -223,33 +228,69 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
 
             int idx = findClosestIndex(rayStart, rayDir);
             if (idx >= 0) {
-                // 去重
+                if (distPickCount == 0) {
+                    distIdxA = idx;
+                    distPickCount = 1;
+                    // 可选：给第一点上色或高亮
+                } else {
+                    distIdxB = idx;
+                    distPickCount = 0; // 重置，方便下一次测距
+
+                    // 计算距离并弹窗
+                    const float d = euclid3(pointCloud[distIdxA], pointCloud[distIdxB]); // 单位：你的点云单位（看起来是 mm）
+                    // 同时展示米（假设你的单位是 mm；若是 m，请把 /1000 去掉或改成 *1000）
+                    const double d_m = d / 1000.0;
+
+                    QMessageBox msg(this);
+                    msg.setWindowTitle(tr("两点测距"));
+                    msg.setIcon(QMessageBox::Information);
+                    msg.setText(tr("点 A: #%1\n点 B: #%2\n距离: %3 (单位)\n≈ %4 m")
+                                    .arg(distIdxA)
+                                    .arg(distIdxB)
+                                    .arg(d, 0, 'f', 3)      // 3位小数，可调
+                                    .arg(d_m, 0, 'f', 3));  // 假设原单位mm
+                    msg.addButton(QMessageBox::Ok);
+                    msg.exec();
+
+                    // 可选：清除高亮
+                    // distIdxA = distIdxB = -1;
+                }
+            }
+            return; // 左键在测距模式下已处理
+        }
+
+        // —— ② 你的“选点选区/摆尾/整体”等模式 —— //
+        if (pickingEnabled || pickingEnabled_swing || pickEnabled_all || pickEnabled_stretchX) {
+            float x = (2.0f * event->x()) / width() - 1.0f;
+            float y = 1.0f - (2.0f * event->y()) / height();
+            QVector3D rayStart = unproject(x, y, 0.0f);
+            QVector3D rayEnd   = unproject(x, y, 1.0f);
+            QVector3D rayDir   = (rayEnd - rayStart).normalized();
+
+            int idx = findClosestIndex(rayStart, rayDir);
+            if (idx >= 0) {
                 if (std::find(pickedIdx.begin(), pickedIdx.end(), idx) == pickedIdx.end()) {
                     pickedIdx.push_back(idx);
                 }
-                // 收够 3 个：计算并涂色
                 if (pickedIdx.size() == 2) {
-                    // 排序信息若还没准备好，这里保证一下
                     if (rankOfIndex.size() != pointCloud.size()) {
                         rebuildSortByXAndRanks();
                     }
                     applySelectionFrom3Picked();
-                    // 若选完就退出选点模式，可在此自动关闭；不想自动关则注释下一行
-                    // pickingEnabled = false;
-                    pickedIdx.clear(); // 清空，便于下一轮选择
+                    pickedIdx.clear();
                     update();
                 }
             }
-            return; // 已处理左键
+            return;
         }
 
-        // —— 你已有的“点选聚焦”逻辑 —— //
+        // —— ③ 你的原始聚焦/旋转逻辑 —— //
         if (needNewFocus) {
             float x = (2.0f * event->x()) / width() - 1.0f;
             float y = 1.0f - (2.0f * event->y()) / height();
             QVector3D rayStart = unproject(x, y, 0.0f);
-            QVector3D rayEnd = unproject(x, y, 1.0f);
-            QVector3D rayDir = (rayEnd - rayStart).normalized();
+            QVector3D rayEnd   = unproject(x, y, 1.0f);
+            QVector3D rayDir   = (rayEnd - rayStart).normalized();
             m_selectedPoint = findClosestPoint(rayStart, rayDir);
             if (!m_selectedPoint.isNull()) {
                 focusPoint = m_selectedPoint;
@@ -353,8 +394,10 @@ void cloudRender::leaveEvent(QEvent *)
 }
 void cloudRender::enterEvent(QEvent *)
 {
-    setCursor(needNewFocus ? Qt::CrossCursor : Qt::OpenHandCursor);
+    setCursor(needNewFocus ? Qt::CrossCursor
+                           : (pickEnabled_distance ? Qt::CrossCursor : Qt::OpenHandCursor));
 }
+
 
 void cloudRender::selectFocus()
 {

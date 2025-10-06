@@ -665,3 +665,15 @@ void MainWindow::on_radioButton_2_toggled(bool checked)
     {ui->openGLWidget->clearSelection();}
 }
 
+
+void MainWindow::on_radioButton_3_toggled(bool checked)
+{
+    ui->openGLWidget->pickEnabled_distance=checked;
+    if(!checked)
+    {
+        ui->openGLWidget->clearSelection();
+        ui->openGLWidget->distPickCount = 0; ui->openGLWidget->distIdxA = ui->openGLWidget->distIdxB = -1;
+    }
+
+}
+
