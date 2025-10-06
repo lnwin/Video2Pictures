@@ -45,6 +45,8 @@ public:
       void saveAfterprocessTxt(const QString& dirPath);
      int  distPickCount = 0;              // 已选点计数（0/1）
      int  distIdxA = -1, distIdxB = -1;   // 两个被选点的索引
+     void beginBulkLoad(size_t expectedPoints = 0);
+     void endBulkLoad();
 signals:
     void sendUpdateSIG();
     void saveMyCloud_openGL(std::vector<PcdPoint>);
@@ -64,6 +66,7 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
 
 private:
+     bool deferRepaint_ = false;
     // private:
     float intensityMin =  std::numeric_limits<float>::infinity();
     float intensityMax = -std::numeric_limits<float>::infinity();

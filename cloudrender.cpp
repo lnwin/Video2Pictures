@@ -286,7 +286,21 @@ static inline float euclid3(const cv::Vec4f& a, const cv::Vec4f& b){
     const float dx = a[0]-b[0], dy = a[1]-b[1], dz = a[2]-b[2];
     return std::sqrt(dx*dx + dy*dy + dz*dz);
 }
+void cloudRender::beginBulkLoad(size_t expectedPoints) {
+    deferRepaint_ = true;
+    if (expectedPoints) {
+        pointCloud.reserve(pointCloud.size() + expectedPoints);
+        pointCloud2Save.reserve(pointCloud2Save.size() + expectedPoints);
+        selectMask.reserve(pointCloud.size() + expectedPoints);
+    }
+}
 
+void cloudRender::endBulkLoad() {
+    deferRepaint_ = false;
+    rebuildSortByXAndRanks();   // 只做一次
+    b2C_openGL();               // 重设视角
+    update();                   // 一次重绘
+}
 void cloudRender::mousePressEvent(QMouseEvent *event)
 {
     lastMousePos = QVector2D(event->pos());
@@ -513,7 +527,7 @@ void cloudRender::getCloud2Show(const std::vector<PcdPoint>& myCloud)
     // 这里简单起见：每次更新都重建（数据量大时可优化）
     rebuildSortByXAndRanks();
 
-    update();
+   if (!deferRepaint_) update();
 
 }
 void cloudRender::getScanControl_opengl(quint8 sig)

@@ -326,34 +326,29 @@ static inline QStringList splitFlexible(const QString& s) {
 
 // 解析一行：xyz 必须；强度、时间戳可选
 // 返回 true 表示成功，并填充 out
-static bool parsePcdLine(const QString& line, PcdPoint& p)
-{
-    QString s = line.trimmed();
-    if (s.isEmpty() || s.startsWith('#')) return false;
+static inline const char* skipDelims(const char* s) {
+    while (*s == ' ' || *s == '\t' || *s == ',' ) ++s;
+    return s;
+}
+static inline bool parsePcdLineFast(const QByteArray& line, PcdPoint& p) {
+    const char* s = line.constData();
+    // 跳过前导空白/逗号
+    s = skipDelims(s);
+    if (*s == '\0' || *s == '#') return false;
 
-    // 统一把逗号替换为空格，然后按空白切分
-    s.replace(',', ' ');
-    const QStringList toks = s.split(QRegularExpression("\\s+"),
-                                     Qt::SkipEmptyParts);
-    if (toks.size() < 3) return false;
+    char* end = nullptr;
+    p.x = std::strtof(s, &end); if (end==s) return false; s = skipDelims(end);
+    p.y = std::strtof(s, &end); if (end==s) return false; s = skipDelims(end);
+    p.z = std::strtof(s, &end); if (end==s) return false; s = skipDelims(end);
 
-    const QLocale c = QLocale::c(); // C locale，支持科学计数法 & '.' 小数点
-    bool okx=false, oky=false, okz=false, oki=true;
-
-    p.x = c.toFloat(toks[0], &okx);
-    p.y = c.toFloat(toks[1], &oky);
-    p.z = c.toFloat(toks[2], &okz);
-
-    // 强度可选：有就解析，没有置 0
-    if (toks.size() >= 4) {
-        p.intensity = c.toFloat(toks[3], &oki);
+    // 强度可选
+    if (*s != '\0' && *s != '\n' && *s != '\r') {
+        p.intensity = std::strtof(s, &end);
+        if (end==s) p.intensity = 0.0f;
     } else {
         p.intensity = 0.0f;
-        oki = true;
     }
-
-    return okx && oky && okz && oki && std::isfinite(p.x) && std::isfinite(p.y)
-           && std::isfinite(p.z) && std::isfinite(p.intensity);
+    return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) && std::isfinite(p.intensity);
 }
 
 
@@ -362,162 +357,98 @@ static bool parsePcdLine(const QString& line, PcdPoint& p)
 static bool loadTxtAndFeedToViewer(const QString& path,
                                    cloudRender* viewer,
                                    bool normalizeIntensity = true,
-                                   int batchSize = 200000)
+                                   int batchSize = 1000000) // 更大的 batch
 {
     if (!viewer) return false;
-
     QFile f(path);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "[loadTxt] open failed:" << path;
-        return false;
-    }
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
 
-    QTextStream ts(&f);
-    ts.setCodec("UTF-8");
-    ts.setLocale(QLocale::c());   // 支持科学计数法 & '.' 小数点
-
-    // === 进度条弹窗 ===
-    QProgressDialog dlg(QObject::tr("扫描点云(1/2)…"), QObject::tr("取消"),
-                        0, 0, viewer);  // 0,0 => 不定进度
-    dlg.resize(600, 120);  // 调整窗口尺寸
-    dlg.setWindowTitle(QObject::tr("正在扫描点云数据"));
+    QProgressDialog dlg(QObject::tr("扫描点云(1/2)…"), QObject::tr("取消"), 0, 0, viewer);
+    dlg.setWindowTitle(QObject::tr("正在加载点云数据"));
+    dlg.setFixedSize(600, 120);   // 一劳永逸
     dlg.setWindowModality(Qt::ApplicationModal);
-    dlg.setMinimumDuration(0);          // 立即显示
+    dlg.setMinimumDuration(0);
     dlg.setAutoClose(false);
     dlg.setAutoReset(false);
 
-    // 第1遍：统计 min/max
+    // —— 第一遍：min/max + 行数 —— //
     bool first = true;
     float minZ=0.f, maxZ=0.f, minI=0.f, maxI=0.f;
     bool hasAnyIntensity = false;
-
-    // 可选：计时 & 节流更新
-    QElapsedTimer tick; tick.start();
-    const int UI_UPDATE_MS = 50; // 每 50ms 刷新一次 UI
-
-    {
-        QString line;
-        while (ts.readLineInto(&line)) {
-            if (dlg.wasCanceled()) { f.close(); return false; }
-
-            PcdPoint p;
-            if (!parsePcdLine(line, p)) continue;
-
-            if (first) {
-                minZ = maxZ = p.z;
-                minI = maxI = p.intensity;
-                first = false;
-            } else {
-                minZ = std::min(minZ, p.z); maxZ = std::max(maxZ, p.z);
-                minI = std::min(minI, p.intensity); maxI = std::max(maxI, p.intensity);
-            }
-            if (std::isfinite(p.intensity) && std::fabs(p.intensity) > 1e-12f)
-                hasAnyIntensity = true;
-
-            if (tick.elapsed() > UI_UPDATE_MS) {
-                qApp->processEvents();
-                tick.restart();
-            }
-        }
-    }
-
-    // 重置到文件开头
-    f.seek(0);
-    ts.seek(0);
-
-    // 统计总行数（用于确定进度条最大值）
-    // 如果你不想再循环一次数行，可在上面扫描时顺便计数保存下来。
     qint64 totalLines = 0;
-    {
-        QString line;
-        while (ts.readLineInto(&line)) { ++totalLines; }
+    QElapsedTimer tick; tick.start();
+    const int UI_UPDATE_MS = 120;
+
+    while (!f.atEnd()) {
+        if (dlg.wasCanceled()) { f.close(); return false; }
+        QByteArray line = f.readLine();
+        ++totalLines;
+
+        PcdPoint p;
+        if (!parsePcdLineFast(line, p)) { if (tick.elapsed()>UI_UPDATE_MS){ qApp->processEvents(); tick.restart(); } continue; }
+
+        if (first) { minZ=maxZ=p.z; minI=maxI=p.intensity; first=false; }
+        else { minZ=std::min(minZ,p.z); maxZ=std::max(maxZ,p.z);
+            minI=std::min(minI,p.intensity); maxI=std::max(maxI,p.intensity); }
+        if (std::isfinite(p.intensity) && std::fabs(p.intensity) > 1e-12f) hasAnyIntensity = true;
+
+        if (tick.elapsed()>UI_UPDATE_MS) { qApp->processEvents(); tick.restart(); }
     }
+
+    // —— 第二遍：实际读取 + 喂 viewer（批量模式）—— //
     f.seek(0);
-    ts.seek(0);
-
-    // 切换为确定进度
-    dlg.setWindowTitle(QObject::tr("正在加载点云数据"));
-
     dlg.setLabelText(QObject::tr("加载点云(2/2)…"));
-    dlg.setRange(0, int(totalLines));
-    dlg.setValue(0);
+    dlg.setRange(0, int(totalLines)); dlg.setValue(0);
 
-    std::vector<PcdPoint> batch;
-    batch.reserve(std::min(batchSize, 800000));
 
     const bool doI = normalizeIntensity && hasAnyIntensity && (std::fabs(maxI - minI) > 1e-6f);
     const bool doZ = normalizeIntensity && !hasAnyIntensity && (std::fabs(maxZ - minZ) > 1e-6f);
     const float invI = doI ? (1.0f / (maxI - minI)) : 1.0f;
     const float invZ = doZ ? (1.0f / (maxZ - minZ)) : 1.0f;
 
-    QString line;
-    qint64 total = 0;
-    qint64 lineNo = 0;
+    std::vector<PcdPoint> batch;
+    batch.reserve(batchSize);
+
+    qint64 lineNo = 0, total = 0;
     tick.restart();
 
-    while (ts.readLineInto(&line)) {
-        if (dlg.wasCanceled()) { f.close(); return false; }
+    viewer->beginBulkLoad(size_t(totalLines)); // ← 关键：禁重绘/重排
 
-        ++lineNo;
+    while (!f.atEnd()) {
+        if (dlg.wasCanceled()) { f.close(); return false; }
+        QByteArray line = f.readLine(); ++lineNo;
 
         PcdPoint p;
-        if (!parsePcdLine(line, p)) {
-            // 也要推进进度
-            if (tick.elapsed() > UI_UPDATE_MS) {
-                dlg.setValue(int(lineNo));
-                qApp->processEvents();
-                tick.restart();
-            }
-            continue;
-        }
+        if (!parsePcdLineFast(line, p)) { if (tick.elapsed()>UI_UPDATE_MS){ dlg.setValue(int(lineNo)); qApp->processEvents(); tick.restart(); } continue; }
 
         if (normalizeIntensity) {
-            if (doI) {
-                p.intensity = std::clamp((p.intensity - minI) * invI, 0.0f, 1.0f);
-            } else if (doZ) {
-                p.intensity = std::clamp((p.z - minZ) * invZ, 0.0f, 1.0f);
-            }
+            if (doI) p.intensity = std::clamp((p.intensity - minI) * invI, 0.0f, 1.0f);
+            else if (doZ) p.intensity = std::clamp((p.z - minZ) * invZ, 0.0f, 1.0f);
         }
 
-        batch.push_back(p);
+        batch.emplace_back(p);
         ++total;
 
         if ((int)batch.size() >= batchSize) {
             viewer->getCloud2Show(batch);
             batch.clear();
-            // 更新 UI
-            if (tick.elapsed() > UI_UPDATE_MS) {
-                dlg.setValue(int(lineNo));
-                qApp->processEvents();
-                tick.restart();
-            }
-        } else {
-            // 也周期性刷新 UI
-            if (tick.elapsed() > UI_UPDATE_MS) {
-                dlg.setValue(int(lineNo));
-                qApp->processEvents();
-                tick.restart();
-            }
         }
-    }
 
-    if (!batch.empty()) {
-        viewer->getCloud2Show(batch);
-        batch.clear();
+        if (tick.elapsed()>UI_UPDATE_MS) { dlg.setValue(int(lineNo)); qApp->processEvents(); tick.restart(); }
     }
+    if (!batch.empty()) viewer->getCloud2Show(batch);
 
     f.close();
 
-    dlg.setValue(int(totalLines)); // 收尾
+    dlg.setValue(int(totalLines));
     dlg.close();
 
-    qDebug() << "[loadTxt] fed points =" << total << "file =" << path;
+    viewer->endBulkLoad();  // ← 一次排序+重绘
 
-    // 可选：回中
-    viewer->b2C_openGL();
-
+    qDebug() << "[loadTxt] fed points =" << total << " file =" << path;
     return (total > 0);
 }
+
 
 
 void MainWindow::on_readCloudFile_clicked()
