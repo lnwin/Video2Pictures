@@ -32,13 +32,13 @@ public:
     void resizeGL(int w, int h) override;
 
     void selectFocus(); // 启用点选聚焦
-
+    void clearCloud();
 
      bool pickingEnabled = false;
      bool pickingEnabled_swing = false;
      bool pickEnabled_all = false;
      bool pickEnabled_stretchX = false;   // 新增：X拉伸 + 尾部跟随
-     float stretchXStep = 0.02f;          // 每次按键的拉伸系数增量（2%）
+     float stretchXStep = 0.01f;          // 每次按键的拉伸系数增量（2%）
      bool pickEnabled_distance = false;
 
      void  clearSelection();                      // 清除绿色高亮与已选点

@@ -677,6 +677,30 @@ void cloudRender::clearSelection()
     update();
 
 }
+void cloudRender::clearCloud()
+{
+    // 清空所有点云数据
+    pointCloud.clear();
+    pointCloud2Save.clear();
+
+    // 清空选择状态
+    selectMask.clear();
+    pickedIdx.clear();
+    sortedIdxByX.clear();
+    rankOfIndex.clear();
+
+    // 重置标志位
+    haveSelection = false;
+    selRmin = selRmax = -1;
+    need2Clear = false;
+
+    // 清空强度范围
+    intensityMin = std::numeric_limits<float>::infinity();
+    intensityMax = -std::numeric_limits<float>::infinity();
+
+    // 更新 OpenGL 显示（避免显示旧内容）
+    update();
+}
 
 void cloudRender::keyPressEvent(QKeyEvent *event)
 {

@@ -359,6 +359,8 @@ static bool loadTxtAndFeedToViewer(const QString& path,
                                    bool normalizeIntensity = true,
                                    int batchSize = 1000000) // 更大的 batch
 {
+    viewer->clearCloud();
+
     if (!viewer) return false;
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
@@ -430,13 +432,18 @@ static bool loadTxtAndFeedToViewer(const QString& path,
         ++total;
 
         if ((int)batch.size() >= batchSize) {
+           // viewer->clearCloud();
             viewer->getCloud2Show(batch);
             batch.clear();
         }
 
         if (tick.elapsed()>UI_UPDATE_MS) { dlg.setValue(int(lineNo)); qApp->processEvents(); tick.restart(); }
     }
-    if (!batch.empty()) viewer->getCloud2Show(batch);
+    if (!batch.empty())
+    {
+        // viewer->clearCloud();
+         viewer->getCloud2Show(batch);
+    }
 
     f.close();
 
