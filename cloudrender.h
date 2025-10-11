@@ -47,6 +47,11 @@ public:
      int  distIdxA = -1, distIdxB = -1;   // 两个被选点的索引
      void beginBulkLoad(size_t expectedPoints = 0);
      void endBulkLoad();
+
+     std::vector<QVector3D> pointColor;   // 与 pointCloud 等长
+     bool hasAnyColor_ = false;           // 本批是否包含任一点真彩
+
+
 signals:
     void sendUpdateSIG();
     void saveMyCloud_openGL(std::vector<PcdPoint>);
@@ -66,7 +71,8 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
 
 private:
-     bool deferRepaint_ = false;
+    float sceneRadius_ = 1000.0f;  // 根据当前点云估计的包围半径
+    bool deferRepaint_ = false;
     // private:
     float intensityMin =  std::numeric_limits<float>::infinity();
     float intensityMax = -std::numeric_limits<float>::infinity();
@@ -102,19 +108,23 @@ private:
     QVector3D unproject(float x, float y, float depth);
     QVector3D findClosestPoint(const QVector3D& rayOrigin, const QVector3D& rayDirection);
 
-    // 顶点：位置 + 强度 + 选择标记
     static constexpr const char* vertexShaderSource = R"(
     #version 330 core
-    layout (location = 0) in vec3 aPos;
+    layout (location = 0) in vec3  aPos;
     layout (location = 1) in float aI;
-    layout (location = 2) in float aSel;
+    layout (location = 2) in vec3  aRGB;
+    layout (location = 3) in float aSel;
+
     out float vI;
+    out vec3  vRGB;
     out float vSel;
+
     uniform mat4 projection;
     uniform mat4 view;
-    void main()
-    {
-        vI = aI;
+
+    void main() {
+        vI   = aI;
+        vRGB = aRGB;
         vSel = aSel;
         gl_Position = projection * view * vec4(aPos, 1.0);
     }
@@ -123,10 +133,14 @@ private:
     static constexpr const char* fragmentShaderSource = R"(
     #version 330 core
     in float vI;
+    in vec3  vRGB;
     in float vSel;
+
     out vec4 FragColor;
+
     uniform float uMinI;
     uniform float uMaxI;
+    uniform int   uUseColor;
 
     vec3 jet(float t) {
         float r = clamp(1.5 - abs(4.0*(t-0.75)), 0.0, 1.0);
@@ -135,22 +149,22 @@ private:
         return vec3(r,g,b);
     }
 
-    void main()
-    {
+    void main() {
+        vec3 baseColor;
 
-        if (vSel > 0.5) {
-            FragColor = vec4(0.0, 1.0, 0.0, 1.0);
-            return;
+        if (uUseColor == 1) {
+            baseColor = vRGB;
+        } else {
+
+            float t = (uMaxI > uMinI) ? clamp((vI - uMinI)/(uMaxI - uMinI), 0.0, 1.0) : 0.0;
+            baseColor = vec3(t);
+            // baseColor = jet(t);
         }
+        if (vSel > 0.5) baseColor = mix(baseColor, vec3(0.0, 1.0, 0.0), 0.75);
 
-        float t;
-        if (uMaxI <= uMinI) t = 0.0;
-        else t = clamp((vI - uMinI) / (uMaxI - uMinI), 0.0, 1.0);
-        vec3 col = jet(t);
-        FragColor = vec4(col, 1.0);
+        FragColor = vec4(baseColor, 1.0);
     }
 )";
-
 
     // 工具
     void updateCamera();
@@ -160,10 +174,14 @@ private:
     static constexpr float kNearPlane = 50.0f;      // 5cm
     static constexpr float kFarPlane  = 15000.0f;   // 15m
 
-    inline void clampCameraDistance() {
-        // 让相机距离保持在 (near, far) 的合理区间内，给一点余量
-        cameraDistance = std::clamp(cameraDistance, kNearPlane * 2.0f, kFarPlane * 0.95f);
+    inline void cloudRender::clampCameraDistance() {
+        // 最小距离：场景半径的 0.01 倍（或 5.0 的上限取较大），保证能很近但不为0
+        float minDist = std::max(5.0f, sceneRadius_ * 0.01f);
+        // 最大距离：场景半径的 100 倍，避免滚轮越滚越远数值爆炸
+        float maxDist = std::max(1000.0f, sceneRadius_ * 100.0f);
+        cameraDistance = std::clamp(cameraDistance, minDist, maxDist);
     }
+
 
     // —— 选点 & 排序/遮罩 —— //
                    // 左键是否用于选点

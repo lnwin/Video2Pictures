@@ -15,8 +15,11 @@ struct PcdPoint {
     float   x;
     float   y;
     float   z;
-    float   intensity;
+    float   intensity;    
     quint64 ts_ms;   // 64位毫秒时间戳
+    // 新增：真彩（范围 0~1）与标志（旧数据可不填）
+    float   r{0.f}, g{0.f}, b{0.f};
+    bool    hasColor{false};
 };
 Q_DECLARE_METATYPE(PcdPoint)
 struct  myProjectInformation

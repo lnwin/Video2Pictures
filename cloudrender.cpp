@@ -17,9 +17,20 @@ void cloudRender::updateProjection()
     int w = std::max(1, width());
     int h = std::max(1, height());
 
+    // 基于相机距离与场景半径的自适应裁剪面
+    // 经验系数：near 越小越容易贴近但会损失深度精度，这里给一个与距离/尺寸相关的动态值
+    const float minNear = 0.1f;                    // 不要再用固定 50 这么大的 near
+    const float nearByDist  = cameraDistance * 0.02f;   // 距离的2%
+    const float nearByScale = sceneRadius_   * 0.01f;   // 尺寸的1%
+    float nearP = std::max(minNear, std::min(nearByDist, nearByScale));
+
+    // far 需要覆盖相机到场景另一侧：给到距离+若干倍半径
+    float farP  = std::max(nearP + 1.0f, cameraDistance + sceneRadius_ * 3.0f);
+
     projection.setToIdentity();
-    projection.perspective(45.0f, float(w)/float(h), kNearPlane, kFarPlane);
+    projection.perspective(45.0f, float(w)/float(h), nearP, farP);
 }
+
 
 void cloudRender::initializeGL()
 {
@@ -91,40 +102,60 @@ void cloudRender::paintGL()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     program->bind();
 
-    // 组装一个临时的 GPU 缓冲（x,y,z,i,sel）
     const size_t N = pointCloud.size();
-    static std::vector<float> gpuBuf;   // 复用避免反复分配
-    gpuBuf.resize(N * 5);
+    static std::vector<float> gpuBuf;   // 复用避免分配
+    gpuBuf.resize(N * 8);               // x y z i r g b sel
+
+    // 防御：pointColor 等长
+    if (pointColor.size() != N) {
+        // 若不等长，填充灰度占位
+        pointColor.resize(N, QVector3D(0,0,0));
+        for (size_t i = 0; i < N; ++i) {
+            float g = std::clamp(pointCloud[i][3], 0.f, 1.f);
+            pointColor[i] = QVector3D(g,g,g);
+        }
+    }
+
     for (size_t i = 0; i < N; ++i) {
-        gpuBuf[i*5 + 0] = pointCloud[i][0];
-        gpuBuf[i*5 + 1] = pointCloud[i][1];
-        gpuBuf[i*5 + 2] = pointCloud[i][2];
-        gpuBuf[i*5 + 3] = pointCloud[i][3];                         // intensity
-        gpuBuf[i*5 + 4] = (i < selectMask.size() ? selectMask[i] : 0.0f); // sel
+        gpuBuf[i*8 + 0] = pointCloud[i][0];
+        gpuBuf[i*8 + 1] = pointCloud[i][1];
+        gpuBuf[i*8 + 2] = pointCloud[i][2];
+        gpuBuf[i*8 + 3] = pointCloud[i][3]; // intensity
+        const QVector3D& c = pointColor[i];
+        gpuBuf[i*8 + 4] = c.x();
+        gpuBuf[i*8 + 5] = c.y();
+        gpuBuf[i*8 + 6] = c.z();
+        gpuBuf[i*8 + 7] = (i < selectMask.size() ? selectMask[i] : 0.0f); // sel
     }
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, gpuBuf.size() * sizeof(float), gpuBuf.data(), GL_DYNAMIC_DRAW);
 
     // attrib 0: 位置 (x,y,z)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5*sizeof(float), reinterpret_cast<void*>(0));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8*sizeof(float), reinterpret_cast<void*>(0));
     glEnableVertexAttribArray(0);
 
-    // attrib 1: 强度
-    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 5*sizeof(float), reinterpret_cast<void*>(3*sizeof(float)));
+    // attrib 1: 强度 (i)
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 8*sizeof(float), reinterpret_cast<void*>(3*sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // attrib 2: 选择标记
-    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 5*sizeof(float), reinterpret_cast<void*>(4*sizeof(float)));
+    // attrib 2: 颜色 (r,g,b)
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8*sizeof(float), reinterpret_cast<void*>(4*sizeof(float)));
     glEnableVertexAttribArray(2);
+
+    // attrib 3: 选择标记 (sel)
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, 8*sizeof(float), reinterpret_cast<void*>(7*sizeof(float)));
+    glEnableVertexAttribArray(3);
 
     program->setUniformValue("projection", projection);
     program->setUniformValue("view", view);
     program->setUniformValue("uMinI", intensityMin);
     program->setUniformValue("uMaxI", intensityMax);
+    program->setUniformValue("uUseColor", hasAnyColor_ ? 1 : 0); // ★ 关键：如果本批中有任意彩色点，就用真彩
 
     glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(N));
 
+    glDisableVertexAttribArray(3);
     glDisableVertexAttribArray(2);
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
@@ -218,6 +249,7 @@ QVector3D cloudRender::sphericalToCartesian(float yaw, float pitch, float distan
 
 void cloudRender::resetView()
 {
+    float maxDist = 0.0f;
     if (pointCloud.empty()) {
         focusPoint = QVector3D(0,0,0);
         cameraDistance = 1000.0f;  // 空场景默认 1m
@@ -225,7 +257,7 @@ void cloudRender::resetView()
         // 计算质心
         QVector3D center(0,0,0);
         int valid = 0;
-        float maxDist = 0.0f;
+
         for (const auto& p : pointCloud) {
             if (std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2])) {
                 QVector3D pt(p[0], p[1], p[2]);
@@ -249,8 +281,9 @@ void cloudRender::resetView()
 
     cameraYaw = 0.0f;
     cameraPitch = 0.0f;
-    // m_rot = QQuaternion::fromAxisAndAngle(0, 1, 0, 180.0f);  // ← 朝向 +Z
-    // updateCamera();
+    sceneRadius_ = std::max(1.0f, maxDist);
+    updateProjection();
+
 }
 
 QVector3D cloudRender::unproject(float x, float y, float depth)
@@ -291,9 +324,11 @@ void cloudRender::beginBulkLoad(size_t expectedPoints) {
     if (expectedPoints) {
         pointCloud.reserve(pointCloud.size() + expectedPoints);
         pointCloud2Save.reserve(pointCloud2Save.size() + expectedPoints);
+        pointColor.reserve(pointColor.size() + expectedPoints); // ★ 新增
         selectMask.reserve(pointCloud.size() + expectedPoints);
     }
 }
+
 
 void cloudRender::endBulkLoad() {
     deferRepaint_ = false;
@@ -473,6 +508,7 @@ void cloudRender::wheelEvent(QWheelEvent *event)
     float factor = event->angleDelta().y() > 0 ? 0.9f : 1.1f;
     cameraDistance *= factor;
     clampCameraDistance();
+    updateProjection();   // ★ 新增：根据新的 distance 重新设 near/far
     updateCamera();
 }
 
@@ -498,12 +534,13 @@ void cloudRender::getCloud2Show(const std::vector<PcdPoint>& myCloud)
     if (need2Clear) {
         pointCloud2Save.clear();
         pointCloud.clear();
+        pointColor.clear();          // ★ 新增：清颜色
+        hasAnyColor_ = false;        // ★ 新增：复位
         need2Clear = false;
 
         intensityMin =  std::numeric_limits<float>::infinity();
         intensityMax = -std::numeric_limits<float>::infinity();
 
-        // 清空选择
         clearSelection();
     }
 
@@ -511,25 +548,34 @@ void cloudRender::getCloud2Show(const std::vector<PcdPoint>& myCloud)
 
     size_t oldN = pointCloud.size();
     pointCloud.reserve(oldN + myCloud.size());
+    pointColor.reserve(oldN + myCloud.size());   // ★ 新增：预留颜色容量
+
     for (const auto& p : myCloud) {
+        // 主容器：x,y,z,intensity
         pointCloud.emplace_back(p.x, p.y, p.z, p.intensity);
+
+        // 颜色容器：有色→真彩，无色→强度灰度占位
+        if (p.hasColor) {
+            pointColor.emplace_back(p.r, p.g, p.b);
+            hasAnyColor_ = true;
+        } else {
+            float g = std::isfinite(p.intensity) ? std::clamp(p.intensity, 0.f, 1.f) : 0.f;
+            pointColor.emplace_back(g, g, g);
+        }
+
         if (std::isfinite(p.intensity)) {
             intensityMin = std::min(intensityMin, p.intensity);
             intensityMax = std::max(intensityMax, p.intensity);
         }
     }
 
-    // 确保 selectMask 与 pointCloud 同步
+    // 保证 selectMask 等长
     selectMask.resize(pointCloud.size(), 0.0f);
 
-    // 数据改变后，若后面要算百分位，需要有排序与 rank
-    // 为避免频繁重排：可以等“第三个点选完”再 rebuild。
-    // 这里简单起见：每次更新都重建（数据量大时可优化）
     rebuildSortByXAndRanks();
-
-   if (!deferRepaint_) update();
-
+    if (!deferRepaint_) update();
 }
+
 void cloudRender::getScanControl_opengl(quint8 sig)
 {
     if(sig!=0x12)
@@ -567,7 +613,8 @@ void cloudRender::b2C_openGL()
         // 根据点云尺度设置相机距离（保持与 resetView 的策略一致）
         cameraDistance = std::max(300.0f, maxDist * 2.0f);
     }
-
+    sceneRadius_ = std::max(1.0f, maxDist);  // 避免为0
+    updateProjection();                      // 半径变了，更新投影
     // 设置焦点与旋转中心
     focusPoint = centroid;
 
@@ -682,7 +729,9 @@ void cloudRender::clearCloud()
     // 清空所有点云数据
     pointCloud.clear();
     pointCloud2Save.clear();
-
+    // ★ 新增：
+    pointColor.clear();
+    hasAnyColor_ = false;
     // 清空选择状态
     selectMask.clear();
     pickedIdx.clear();
@@ -783,7 +832,7 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
         QOpenGLWidget::keyPressEvent(event);
         return;
     }
-    float mul = 1.0f;
+    float mul = 0.5f;
     if (event->modifiers() & Qt::ShiftModifier)  mul *= 10.0f;
     if (event->modifiers() & Qt::ControlModifier) mul *= 0.1f;
     dY *= mul; dZ *= mul;

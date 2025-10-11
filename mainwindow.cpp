@@ -5,78 +5,44 @@ struct PsonnavReadOptions {
     bool verifyChecksum = true;   // 校验 "*HH"；失败行将被跳过
     bool requireValidFlags = false; // 需要位置/姿态状态为 'A' 才收集
 };
-
-// 解析一行 x,y,z[,其他]；返回是否成功；自动兼容逗号/空白；输出 tokens 与分隔类型
-static bool parseXYZLine(const QString& line,
-                         float& x, float& y, float& z,
-                         QStringList& tokensOut,
-                         QChar& delimOut)
+static inline bool parseLine_XYZ_I_or_RGB(const QByteArray& line, PcdPoint& p)
 {
-    QString s = line.trimmed();
-    if (s.isEmpty()) return false;
+    const char* s = line.constData();
+    char* endp = nullptr;
 
-    QStringList parts;
-    QChar delim = s.contains(',') ? QChar(',') : QChar(' ');
-
-    if (delim == QChar(',')) {
-        parts = s.split(',', Qt::SkipEmptyParts);
-    } else {
-        parts = s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+    float vals[8]; int n=0;
+    for (; n<8; ++n) {
+        while (*s==' '||*s=='\t'||*s=='\r'||*s=='\n') ++s;
+        if (*s=='\0') break;
+        vals[n] = strtof(s, &endp);
+        if (endp==s) break;
+        s = endp;
     }
-    if (parts.size() < 3) return false;
+    if (n < 3) return false;
 
-    bool okx=false, oky=false, okz=false;
-    float xx = parts[0].toFloat(&okx);
-    float yy = parts[1].toFloat(&oky);
-    float zz = parts[2].toFloat(&okz);
-    if (!(okx && oky && okz)) return false;
+    p.x = vals[0]; p.y = vals[1]; p.z = vals[2];
+    p.hasColor = false; p.r = p.g = p.b = 0.f;
 
-    x = xx; y = yy; z = zz;
-    tokensOut = parts;
-    delimOut  = delim;
+    if (n >= 6) { // XYZ + RGB
+        float R = vals[3], G = vals[4], B = vals[5];
+        const bool is255 = (R>1.f || G>1.f || B>1.f);
+        const float k = is255 ? (1.f/255.f) : 1.f;
+        p.r = std::clamp(R*k, 0.f, 1.f);
+        p.g = std::clamp(G*k, 0.f, 1.f);
+        p.b = std::clamp(B*k, 0.f, 1.f);
+        p.hasColor = true;
+        p.intensity = 0.2126f*p.r + 0.7152f*p.g + 0.0722f*p.b; // 亮度备份
+    } else if (n == 4) { // XYZI
+        p.intensity = vals[3];
+    } else { // 只有 XYZ
+        p.intensity = 0.f;
+    }
     return true;
 }
 
-// 把 x,y,z + 其余列重新拼回一行；尽量保留原来的分隔风格
-static QString rebuildLine(float x, float y, float z,
-                           const QStringList& originalTokens,
-                           QChar delim)
-{
-    QStringList out;
-    out.reserve(originalTokens.size());
-    out << QString::number(x, 'f', 6)
-        << QString::number(y, 'f', 6)
-        << QString::number(z, 'f', 6);
-    for (int i = 3; i < originalTokens.size(); ++i) out << originalTokens[i];
 
-    if (delim == QChar(',')) return out.join(',');
-    return out.join(' ');
-}
 
-// 给定进度 frac∈[0,1]，从分段表取当帧的 (yMm, zMm, speedMps)
-static void sampleYZandSpeed(double frac,
-                             const std::vector<YZOffsetGroup>& groups,
-                             double& yMm, double& zMm, double& speedMps,
-                             double defaultSpeedMps)
-{
-    yMm = 0.0; zMm = 0.0; speedMps = defaultSpeedMps;
-    for (const auto& g : groups) {
-        if (frac >= g.startFrac && frac < g.endFrac) {
-            if (g.interpolate) {
-                const double a = (g.endFrac > g.startFrac)
-                                     ? (frac - g.startFrac) / (g.endFrac - g.startFrac)
-                                     : 0.0;
-                yMm = g.yStartMm + a * (g.yEndMm - g.yStartMm);
-                zMm = g.zStartMm + a * (g.zEndMm - g.zStartMm);
-            } else {
-                yMm = g.yEndMm;
-                zMm = g.zEndMm;
-            }
-            if (g.useSpeedOverride) speedMps = g.speedOverride;
-            break;
-        }
-    }
-}
+
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -318,11 +284,7 @@ QVector<double> loadHeadingsFromPsonnavFile(const QString& path,
     }
     return headings;
 }
-// 兼容“逗号 or 任意空白”分隔
-static inline QStringList splitFlexible(const QString& s) {
-    return s.contains(',') ? s.split(',', Qt::SkipEmptyParts)
-                           : s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-}
+
 
 // 解析一行：xyz 必须；强度、时间戳可选
 // 返回 true 表示成功，并填充 out
@@ -387,7 +349,7 @@ static bool loadTxtAndFeedToViewer(const QString& path,
         ++totalLines;
 
         PcdPoint p;
-        if (!parsePcdLineFast(line, p)) { if (tick.elapsed()>UI_UPDATE_MS){ qApp->processEvents(); tick.restart(); } continue; }
+        if (!parseLine_XYZ_I_or_RGB(line, p)) { if (tick.elapsed()>UI_UPDATE_MS){ qApp->processEvents(); tick.restart(); } continue; }
 
         if (first) { minZ=maxZ=p.z; minI=maxI=p.intensity; first=false; }
         else { minZ=std::min(minZ,p.z); maxZ=std::max(maxZ,p.z);
@@ -421,7 +383,7 @@ static bool loadTxtAndFeedToViewer(const QString& path,
         QByteArray line = f.readLine(); ++lineNo;
 
         PcdPoint p;
-        if (!parsePcdLineFast(line, p)) { if (tick.elapsed()>UI_UPDATE_MS){ dlg.setValue(int(lineNo)); qApp->processEvents(); tick.restart(); } continue; }
+        if (!parseLine_XYZ_I_or_RGB(line, p)) { if (tick.elapsed()>UI_UPDATE_MS){ dlg.setValue(int(lineNo)); qApp->processEvents(); tick.restart(); } continue; }
 
         if (normalizeIntensity) {
             if (doI) p.intensity = std::clamp((p.intensity - minI) * invI, 0.0f, 1.0f);
