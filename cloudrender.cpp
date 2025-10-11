@@ -885,52 +885,52 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
 
 void cloudRender::saveAfterprocessTxt(const QString& dirPath)
 {
-    // 1) 校验点云
-    if (pointCloud.empty()) {
+    if (pointCloud2Save.empty()) {
         QMessageBox::information(this, tr("提示"), tr("当前没有可保存的点云数据。"));
         return;
     }
 
-    // 2) 准备输出目录与文件路径
     QDir outDir(dirPath);
-    if (!outDir.exists()) {
-        if (!outDir.mkpath(".")) {
-            QMessageBox::warning(this, tr("错误"), tr("无法创建输出目录：%1").arg(dirPath));
-            return;
-        }
+    if (!outDir.exists() && !outDir.mkpath(".")) {
+        QMessageBox::warning(this, tr("错误"), tr("无法创建输出目录：%1").arg(dirPath));
+        return;
     }
     const QString filePath = outDir.filePath("afterprocess.txt");
 
-    // 3) 用 QSaveFile 保证写入原子性
     QSaveFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QMessageBox::warning(this, tr("错误"), tr("无法打开文件用于写入：%1").arg(filePath));
         return;
     }
 
-    // 4) 文本流设置为 C 区域，使用 '.' 作为小数点，避免本地化逗号
     QTextStream ts(&file);
     ts.setLocale(QLocale::c());
-    ts.setRealNumberNotation(QTextStream::ScientificNotation); // 或 FixedNotation
-    ts.setRealNumberPrecision(7); // 精度可按需调整
+    ts.setRealNumberNotation(QTextStream::ScientificNotation);
+    ts.setRealNumberPrecision(7);
 
-    // 5) 写入数据：x y z intensity，每行一条
-    //    注意：pointCloud 是 std::vector<cv::Vec4f>，依次为 x y z intensity
-    const qsizetype N = static_cast<qsizetype>(pointCloud.size());
-    for (qsizetype i = 0; i < N; ++i) {
-        const cv::Vec4f& p = pointCloud[static_cast<size_t>(i)];
-        // 跳过非有限值（可按需保留）
-        if (!(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]) && std::isfinite(p[3]))) {
-            continue;
+    qsizetype written = 0;
+    for (const PcdPoint& p : pointCloud2Save) {
+        if (!(std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z))) continue;
+
+        if (p.hasColor && std::isfinite(p.r) && std::isfinite(p.g) && std::isfinite(p.b)) {
+            const float r = std::clamp(p.r, 0.0f, 1.0f);
+            const float g = std::clamp(p.g, 0.0f, 1.0f);
+            const float b = std::clamp(p.b, 0.0f, 1.0f);
+            ts << p.x << ' ' << p.y << ' ' << p.z << ' ' << r << ' ' << g << ' ' << b << '\n';
+        } else {
+            const float I = std::isfinite(p.intensity) ? p.intensity : 0.0f;
+            ts << p.x << ' ' << p.y << ' ' << p.z << ' ' << I << '\n';
         }
-        ts << p[0] << ' ' << p[1] << ' ' << p[2] << ' ' << p[3] << '\n';
+        ++written;
     }
 
-    // 6) 提交写入
     if (!file.commit()) {
         QMessageBox::warning(this, tr("错误"), tr("写入失败：%1").arg(file.errorString()));
         return;
     }
 
-    QMessageBox::information(this, tr("完成"), tr("已保存点云到：%1").arg(filePath));
+    QMessageBox::information(this, tr("完成"),
+                             tr("已保存 %1 条点到：%2").arg(written).arg(filePath));
 }
+
+
