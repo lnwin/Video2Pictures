@@ -51,7 +51,7 @@ void cloudRender::initializeGL()
     // ① 设定“你想要的初始姿态”
     m_rot    = QQuaternion();           // 例如：面向 -Z
     cameraUp = QVector3D(1, 0, 0);      // 你现在的初始 up
-    m_worldUp = cameraUp;               // 记住这就是世界上轴基准
+    m_worldUp = QVector3D(0,1,0);             // 记住这就是世界上轴基准
     // ② 计算中心&距离（仅负责中心/距离，不改 m_rot/up）
     resetView();                       // ← 确保 resetView 里不再改 m_rot！
     // ③ 用当前 m_rot/m_worldUp 统一刷新相机与 view
@@ -215,26 +215,27 @@ void cloudRender::updateCamera()
 {
     clampCameraDistance();
 
-    QVector3D forward = m_rot.rotatedVector(QVector3D(0, 0, 1)).normalized();
-    QVector3D upRaw   = m_rot.rotatedVector(QVector3D(1, 0,  0));  // ← 不是 (1,0,0)！
+    // 统一用 -Z 作为相机前向的基向量
+    QVector3D forward = m_rot.rotatedVector(QVector3D(0,0,-1)).normalized();
+
+    // 以 m_worldUp 为“世界上轴”，建议 m_worldUp = (0,1,0)
+    QVector3D upRaw = m_rot.rotatedVector(m_worldUp);
 
     // 去 roll：投影到与 forward 垂直的平面
     QVector3D upProj = upRaw - QVector3D::dotProduct(upRaw, forward) * forward;
     if (upProj.lengthSquared() < 1e-6f) {
-        upProj = m_worldUp - QVector3D::dotProduct(m_worldUp, forward) * forward;  // ← 用初始化的世界上轴
-        if (upProj.lengthSquared() < 1e-6f) upProj = QVector3D(1,0,0);
+        upProj = m_worldUp - QVector3D::dotProduct(m_worldUp, forward) * forward;
+        if (upProj.lengthSquared() < 1e-6f) upProj = QVector3D(0,1,0);
     }
     cameraUp = upProj.normalized();
 
-
-    // 相机位置：沿 forward 的反方向退 distance
     cameraPosition = focusPoint - forward * cameraDistance;
-
     view.setToIdentity();
     view.lookAt(cameraPosition, focusPoint, cameraUp);
 
-    update(); // 触发重绘
+    update();
 }
+
 
 
 
@@ -638,24 +639,37 @@ void cloudRender::b2C_openGL()
 // 返回“最近点”的索引（基于你已有的光线最近点搜索）
 int cloudRender::findClosestIndex(const QVector3D& rayOrigin, const QVector3D& rayDir)
 {
-    float minDist = std::numeric_limits<float>::max();
-    int   bestIdx = -1;
-    const float searchRadius = 10.0f;
+    const float fovy_deg = 45.0f;                          // 和你的投影一致
+    const float fovy = fovy_deg * float(M_PI) / 180.0f;
+    const int   H = std::max(1, height());
+    const float pickPixels = 6.0f;                         // 鼠标命中半径（像素）
+
+    int bestIdx = -1;
+    float bestDist = std::numeric_limits<float>::max();
+
     for (int i = 0; i < (int)pointCloud.size(); ++i) {
         const auto& p = pointCloud[i];
         QVector3D pt(p[0], p[1], p[2]);
+
         QVector3D v = pt - rayOrigin;
-        float t = QVector3D::dotProduct(v, rayDir);
+        float t = QVector3D::dotProduct(v, rayDir);        // 光线前进距离（世界单位）
         if (t < 0) continue;
+
+        // 该深度处，1 像素的世界长度（近似）： 2*t*tan(fov/2)/H
+        float worldPerPixel = 2.f * t * std::tan(fovy * 0.5f) / float(H);
+        float worldRadius   = pickPixels * worldPerPixel;
+
         QVector3D proj = rayOrigin + rayDir * t;
-        float dist = (pt - proj).length();
-        if (dist < searchRadius && dist < minDist) {
-            minDist = dist;
-            bestIdx = i;
+        float distRay = (pt - proj).length();              // 点到光线的最近距离
+
+        if (distRay < worldRadius && distRay < bestDist) {
+            bestDist = distRay;
+            bestIdx  = i;
         }
     }
-    return bestIdx; // -1 表示没找到
+    return bestIdx;
 }
+
 
 // 以 X 坐标排序，并建立 rankOfIndex
 void cloudRender::rebuildSortByXAndRanks()
@@ -767,62 +781,54 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
     const int Nsel = rmax - rmin + 1;
     if (Nsel <= 0) return;
 
-    // ===== 新增：X轴拉伸（键盘触发），优先级最高 =====
+    // ===== X 轴拉伸优先 =====
     if (pickEnabled_stretchX && (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right)) {
-        // 计算拉伸增量：右=扩张，左=收缩
         float k = (event->key() == Qt::Key_Right ? +stretchXStep : -stretchXStep);
         float mul = 1.0f;
-        if (event->modifiers() & Qt::ShiftModifier)  mul *= 10.0f;
+        if (event->modifiers() & Qt::ShiftModifier)   mul *= 10.0f;
         if (event->modifiers() & Qt::ControlModifier) mul *= 0.1f;
         k *= mul;
 
         const int Ntotal = static_cast<int>(sortedIdxByX.size());
         if (Ntotal <= 0) return;
 
-        // 以选区左端点作为锚点：xmin = X(rmin)
         const int idxMin = sortedIdxByX[rmin];
         const int idxMax = sortedIdxByX[rmax];
         const float xmin = pointCloud[idxMin][0];
         const float oldX_rmax = pointCloud[idxMax][0];
 
-        // 1) 选区内线性拉伸：rmin 不动，rmax 权重1，其它点 0..1
         for (int r = rmin; r <= rmax; ++r) {
             int idx = sortedIdxByX[r];
             float& x = pointCloud[idx][0];
-            float w  = (Nsel > 1) ? float(r - rmin) / float(Nsel - 1) : 1.0f; // 0..1
-            float scale = 1.0f + k * w;   // 允许微收缩/扩张
+            float w  = (Nsel > 1) ? float(r - rmin) / float(Nsel - 1) : 1.0f;
+            float scale = 1.0f + k * w;
             x = xmin + (x - xmin) * scale;
         }
-
-        // 2) 尾部跟随：r>rmax 的点等量平移 deltaMax
         const float newX_rmax = pointCloud[idxMax][0];
         const float deltaMax  = newX_rmax - oldX_rmax;
         if (deltaMax != 0.0f) {
-            for (int r = rmax + 1; r < Ntotal; ++r) {
-                int idx = sortedIdxByX[r];
-                pointCloud[idx][0] += deltaMax;
-            }
+            for (int r = rmax + 1; r < Ntotal; ++r)
+                pointCloud[ sortedIdxByX[r] ][0] += deltaMax;
         }
 
-        // 3) X 变了：重建排序/名次，并把选区“绑在同一对端点”上
         rebuildSortByXAndRanks();
         selRmin = rankOfIndex[idxMin];
         selRmax = rankOfIndex[idxMax];
 
-        // 4) 重新染色选区（只保留原选区高亮；尾部跟随不染色，如需也染色可一起置1）
         std::fill(selectMask.begin(), selectMask.end(), 0.0f);
         if (selRmin >= 0 && selRmax >= selRmin) {
-            for (int r = selRmin; r <= selRmax; ++r)
-                selectMask[ sortedIdxByX[r] ] = 1.0f;
+            for (int r = selRmin; r <= selRmax; ++r) selectMask[ sortedIdxByX[r] ] = 1.0f;
             haveSelection = true;
         } else haveSelection = false;
 
         update();
-        return; // 已处理
+        return;
     }
 
-    // ===== 其余：按你原来的 Y/Z 位移逻辑 =====
-    float dY = 0.0f, dZ = 0.0f;
+    // ===== 仅在一个轴上位移（左右→Y， 上下→Z）=====
+    float dY = 0.0f;
+    float dZ = 0.0f;
+
     switch (event->key()) {
     case Qt::Key_Left:  dY = -stepY; break;
     case Qt::Key_Right: dY =  stepY; break;
@@ -832,39 +838,38 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
         QOpenGLWidget::keyPressEvent(event);
         return;
     }
+
+    // 统一倍率：默认 1.0；Shift ×10；Ctrl ×0.1
     float mul = 0.5f;
-    if (event->modifiers() & Qt::ShiftModifier)  mul *= 10.0f;
+    if (event->modifiers() & Qt::ShiftModifier)   mul *= 10.0f;
     if (event->modifiers() & Qt::ControlModifier) mul *= 0.1f;
-    dY *= mul; dZ *= mul;
+
+    if (dY != 0.0f) dY *= mul;  // 只缩放非零轴
+    if (dZ != 0.0f) dZ *= mul;
 
     const int Ntotal = static_cast<int>(sortedIdxByX.size());
 
     if (pickEnabled_all) {
-        // 整体等量：仅选区
         for (int r = rmin; r <= rmax; ++r) {
             int idx = sortedIdxByX[r];
-            pointCloud[idx][1] += dY;   // Y
-            pointCloud[idx][2] += dZ;   // Z
+            if (dY) pointCloud[idx][1] += dY;   // Y
+            if (dZ) pointCloud[idx][2] += dZ;   // Z
         }
-    }
-    else if (pickingEnabled_swing) {
-        // 摆尾：选区内线性(0→1)，r>rmax 尾部全部按最大(=1)跟随
-        // 1) 选区内：线性权重
+    } else if (pickingEnabled_swing) {
         for (int r = rmin; r <= rmax; ++r) {
             int idx = sortedIdxByX[r];
-            float w = (Nsel > 1) ? float(r - rmin) / float(Nsel - 1) : 1.0f; // 0..1
-            pointCloud[idx][1] += dY * w;  // Y
-            pointCloud[idx][2] += dZ * w;  // Z
+            float w = (Nsel > 1) ? float(r - rmin) / float(Nsel - 1) : 1.0f;
+            if (dY) pointCloud[idx][1] += dY * w;
+            if (dZ) pointCloud[idx][2] += dZ * w;
         }
-        // 2) 尾部：等量跟随（权重=1）
-        for (int r = rmax + 1; r < Ntotal; ++r) {
-            int idx = sortedIdxByX[r];
-            pointCloud[idx][1] += dY;      // Y
-            pointCloud[idx][2] += dZ;      // Z
+        if (dY || dZ) {
+            for (int r = rmax + 1; r < Ntotal; ++r) {
+                int idx = sortedIdxByX[r];
+                if (dY) pointCloud[idx][1] += dY;
+                if (dZ) pointCloud[idx][2] += dZ;
+            }
         }
-    }
-    else if (pickingEnabled) {
-        // Hann 窗：中间最大，边缘为 0（仅选区）
+    } else if (pickingEnabled) {
         for (int r = rmin; r <= rmax; ++r) {
             int idx = sortedIdxByX[r];
             float w;
@@ -874,13 +879,12 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
             } else {
                 w = 1.0f;
             }
-            pointCloud[idx][1] += dY * w;  // Y
-            pointCloud[idx][2] += dZ * w;  // Z
+            if (dY) pointCloud[idx][1] += dY * w;
+            if (dZ) pointCloud[idx][2] += dZ * w;
         }
     }
 
     update();
-
 }
 
 void cloudRender::saveAfterprocessTxt(const QString& dirPath)
