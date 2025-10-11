@@ -784,7 +784,7 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
     // ===== X 轴拉伸优先 =====
     if (pickEnabled_stretchX && (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right)) {
         float k = (event->key() == Qt::Key_Right ? +stretchXStep : -stretchXStep);
-        float mul = 1.0f;
+        float mul = 0.5f;
         if (event->modifiers() & Qt::ShiftModifier)   mul *= 10.0f;
         if (event->modifiers() & Qt::ControlModifier) mul *= 0.1f;
         k *= mul;
@@ -889,7 +889,7 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
 
 void cloudRender::saveAfterprocessTxt(const QString& dirPath)
 {
-    if (pointCloud2Save.empty()) {
+    if (pointCloud.empty() || pointCloud2Save.empty()) {
         QMessageBox::information(this, tr("提示"), tr("当前没有可保存的点云数据。"));
         return;
     }
@@ -912,18 +912,30 @@ void cloudRender::saveAfterprocessTxt(const QString& dirPath)
     ts.setRealNumberNotation(QTextStream::ScientificNotation);
     ts.setRealNumberPrecision(7);
 
+    // 以两者最小长度为准，保证一一对应
+    const qsizetype N = std::min<qsizetype>(pointCloud.size(), pointCloud2Save.size());
     qsizetype written = 0;
-    for (const PcdPoint& p : pointCloud2Save) {
-        if (!(std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z))) continue;
 
-        if (p.hasColor && std::isfinite(p.r) && std::isfinite(p.g) && std::isfinite(p.b)) {
-            const float r = std::clamp(p.r, 0.0f, 1.0f);
-            const float g = std::clamp(p.g, 0.0f, 1.0f);
-            const float b = std::clamp(p.b, 0.0f, 1.0f);
-            ts << p.x << ' ' << p.y << ' ' << p.z << ' ' << r << ' ' << g << ' ' << b << '\n';
+    for (qsizetype i = 0; i < N; ++i) {
+        const cv::Vec4f& v = pointCloud[size_t(i)];       // 编辑后的坐标/强度
+        const PcdPoint&  m = pointCloud2Save[size_t(i)];  // 原始的格式元信息
+
+        const float x = v[0], y = v[1], z = v[2];
+
+        if (!(std::isfinite(x) && std::isfinite(y) && std::isfinite(z)))
+            continue;
+
+        if (m.hasColor && std::isfinite(m.r) && std::isfinite(m.g) && std::isfinite(m.b)) {
+            // 按 XYZRGB 写出（颜色取原始真彩；如你有编辑颜色，可替换为当前 pointColor[i]）
+            const float r = std::clamp(m.r, 0.0f, 1.0f);
+            const float g = std::clamp(m.g, 0.0f, 1.0f);
+            const float b = std::clamp(m.b, 0.0f, 1.0f);
+            ts << x << ' ' << y << ' ' << z << ' ' << r << ' ' << g << ' ' << b << '\n';
         } else {
-            const float I = std::isfinite(p.intensity) ? p.intensity : 0.0f;
-            ts << p.x << ' ' << p.y << ' ' << p.z << ' ' << I << '\n';
+            // 按 XYZI 写出（强度你可选用编辑后的 v[3] 或原始 m.intensity）
+            float I = std::isfinite(v[3]) ? v[3]
+                                          : (std::isfinite(m.intensity) ? m.intensity : 0.0f);
+            ts << x << ' ' << y << ' ' << z << ' ' << I << '\n';
         }
         ++written;
     }
@@ -936,5 +948,6 @@ void cloudRender::saveAfterprocessTxt(const QString& dirPath)
     QMessageBox::information(this, tr("完成"),
                              tr("已保存 %1 条点到：%2").arg(written).arg(filePath));
 }
+
 
 
