@@ -136,7 +136,7 @@ void MainWindow::on_selectCloudOutPath_clicked()
 void MainWindow::on_startProcess_clicked()
 {
     myprocess->outputPath=ui->pictureOutPath->text();
-
+    myreconstruction->yuzhi=ui->yuzhi->text().toInt();
     myreconstruction->imagePath=ui->pictureOutPath->text();
 
     myreconstruction->outPutCloudPath=ui->cloudOutPath->text();
@@ -575,5 +575,127 @@ void MainWindow::on_radioButton_3_toggled(bool checked)
         ui->openGLWidget->distPickCount = 0; ui->openGLWidget->distIdxA = ui->openGLWidget->distIdxB = -1;
     }
 
+}
+// 读取 inPath 指定的点云文本（示例行：ts, x, y, z, ... , intensity）
+// 对每个“时间戳组”在 Y 上按 0*DY,1*DY,2*DY… 做偏移，并输出到 outPath
+// 返回 true 表示成功
+static bool offsetYByTimestampGroups_withProgress(QWidget* parent,
+                                                  const QString& inPath,
+                                                  const QString& outPath,
+                                                  double DY,
+                                                  QString* errMsg = nullptr)
+{
+    QFile fin(inPath);
+    if (!fin.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (errMsg) *errMsg = QStringLiteral("无法打开输入文件：%1").arg(inPath);
+        return false;
+    }
+    QFile fout(outPath);
+    if (!fout.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        if (errMsg) *errMsg = QStringLiteral("无法创建输出文件：%1").arg(outPath);
+        return false;
+    }
+
+    QTextStream tin(&fin);
+    QTextStream tout(&fout);
+    tout.setRealNumberNotation(QTextStream::SmartNotation);
+    tout.setRealNumberPrecision(10);
+
+    // ——— 进度条：按字节进度（避免双遍扫描）———
+    const qint64 totalBytes = fin.size();
+    QProgressDialog dlg(QObject::tr("正在处理点云 Y 偏移…"), QObject::tr("取消"), 0,
+                                                                                   totalBytes > 0 ? int(std::min<qint64>(totalBytes, INT_MAX)) : 0, parent);
+    dlg.setWindowTitle(QObject::tr("处理中"));
+    dlg.setWindowModality(Qt::ApplicationModal);
+    dlg.setMinimumDuration(0);   // 立即显示
+    dlg.setAutoReset(false);
+    dlg.setAutoClose(false);
+
+    // 时间戳 -> 组序号
+    QHash<QString, int> ts2group;
+    ts2group.reserve(4096);
+    int nextGroupIndex = 0;
+
+    qint64 okCount = 0, skipCount = 0;
+    qint64 lastProgressBytes = 0;
+    const qint64 progressStep = 1 << 16; // 每64KB刷新一次 UI，降低开销
+
+    while (!tin.atEnd()) {
+        QString line = tin.readLine();
+
+        // 取消检查（避免每行都 processEvents，按块刷新）
+        if (fin.pos() - lastProgressBytes >= progressStep) {
+            lastProgressBytes = fin.pos();
+            if (totalBytes > 0) dlg.setValue(int(std::min<qint64>(fin.pos(), INT_MAX)));
+            QCoreApplication::processEvents();
+            if (dlg.wasCanceled()) {
+                if (errMsg) *errMsg = QStringLiteral("用户取消，已输出 %1 行").arg(okCount);
+                fin.close(); fout.close();
+                // 视需求：可删除半成品输出文件
+                // fout.remove();
+                return false;
+            }
+        }
+
+        if (line.trimmed().isEmpty()) { ++skipCount; continue; }
+
+        // 逗号/空格混排兼容
+        line.replace(',', ' ');
+        const QStringList toks = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        if (toks.size() < 5) { ++skipCount; continue; }
+
+        const QString ts = toks.at(0);
+        bool okX=false, okY=false, okZ=false, okI=false;
+        double x = toks.at(1).toDouble(&okX);
+        double y = toks.at(2).toDouble(&okY);
+        double z = toks.at(3).toDouble(&okZ);
+        double intensity = toks.last().toDouble(&okI); // 最后一列作为强度
+
+        if (!(okX && okY && okZ && okI)) { ++skipCount; continue; }
+
+        // 分配时间戳组序号（首次出现赋新组）
+        int gid;
+        auto it = ts2group.constFind(ts);
+        if (it == ts2group.constEnd()) {
+            gid = nextGroupIndex++;
+            ts2group.insert(ts, gid);
+        } else {
+            gid = it.value();
+        }
+
+        const double yOut = y + gid * DY;
+
+        // 输出：X,Y,Z,强度
+        tout << x << "," << yOut << "," << z << "," << intensity << "\n";
+        ++okCount;
+    }
+
+    // 结束进度
+    if (totalBytes > 0) dlg.setValue(int(std::min<qint64>(totalBytes, INT_MAX)));
+
+    fin.close();
+    fout.close();
+
+    if (errMsg) {
+        *errMsg = QStringLiteral("完成：有效 %1 行，跳过 %2 行，时间戳组数 %3")
+                      .arg(okCount).arg(skipCount).arg(ts2group.size());
+    }
+    return true;
+}
+
+void MainWindow::on_pushButton_3_clicked()
+{
+    QString cloudfileName = QFileDialog::getOpenFileName(this,QStringLiteral("选取Voyis点云！"));
+QString err;
+double DY = 0.02; // 每组 +2cm
+bool ok = offsetYByTimestampGroups_withProgress(this, cloudfileName,
+    ui->cloudOutPath->text()+"/XYZ_processed.txt",
+    ui->speed->text().toDouble(), &err);
+
+if (!ok) {
+    QMessageBox::warning(this, "处理失败", err);
+} else {
+    QMessageBox::information(this, "完成", err);
+}
 }
 

@@ -6,205 +6,226 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>2031</width>
-    <height>1016</height>
+    <width>1049</width>
+    <height>765</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>舟山渊视科技有限公司-点云微调软件-2025-10 - 15192530530</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QHBoxLayout" name="horizontalLayout_11">
+   <layout class="QHBoxLayout" name="horizontalLayout_12">
     <item>
-     <layout class="QHBoxLayout" name="horizontalLayout_10" stretch="1,10">
+     <layout class="QHBoxLayout" name="horizontalLayout_11" stretch="1,7">
       <item>
-       <layout class="QVBoxLayout" name="verticalLayout_3">
+       <layout class="QVBoxLayout" name="verticalLayout_2">
         <item>
-         <layout class="QVBoxLayout" name="verticalLayout_2">
+         <layout class="QHBoxLayout" name="horizontalLayout_5">
           <item>
-           <layout class="QHBoxLayout" name="horizontalLayout_5">
-            <item>
-             <widget class="QLabel" name="label_2">
-              <property name="text">
-               <string>源视频</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLineEdit" name="videoPath"/>
-            </item>
-            <item>
-             <widget class="QPushButton" name="selectVideo">
-              <property name="text">
-               <string>选择视频</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="horizontalLayout_6">
-            <item>
-             <widget class="QLabel" name="label">
-              <property name="text">
-               <string>图片输出路径</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLineEdit" name="pictureOutPath">
-              <property name="layoutDirection">
-               <enum>Qt::LeftToRight</enum>
-              </property>
-              <property name="text">
-               <string>E:/01-公司相关/02-渊视/12-测试/2025.9.29 中山大学激光雷达测试/2号视频完整图片</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="selectOutputPath">
-              <property name="text">
-               <string>选择输出路径</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="horizontalLayout_7">
-            <item>
-             <widget class="QLabel" name="label_3">
-              <property name="text">
-               <string>帧间隔</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLineEdit" name="FPS">
-              <property name="text">
-               <string>20</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="startCut">
-              <property name="text">
-               <string>开始剥离</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <widget class="QProgressBar" name="progressBar">
-            <property name="maximum">
-             <number>90</number>
-            </property>
-            <property name="value">
-             <number>0</number>
+           <widget class="QLabel" name="label_2">
+            <property name="text">
+             <string>源视频</string>
             </property>
            </widget>
           </item>
           <item>
-           <layout class="QHBoxLayout" name="horizontalLayout_8">
-            <item>
-             <widget class="QLabel" name="label_4">
-              <property name="text">
-               <string>点云输出路径</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLineEdit" name="cloudOutPath">
-              <property name="text">
-               <string>E:/01-公司相关/02-渊视/12-测试/2025.9.29 中山大学激光雷达测试/2号视频完整点云</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="selectCloudOutPath">
-              <property name="text">
-               <string>选择输出路径</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
+           <widget class="QLineEdit" name="videoPath"/>
           </item>
           <item>
-           <layout class="QHBoxLayout" name="horizontalLayout_9">
-            <item>
-             <widget class="QComboBox" name="comboBox_pushDirction">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>70</height>
-               </size>
-              </property>
-              <property name="toolTip">
-               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;激光雷达设备： | |========\ \ &lt;/p&gt;&lt;p&gt;X方向为 平行于激光雷达摆臂的方向&lt;/p&gt;&lt;p&gt;Y方向为 平行于旋转电机的方向&lt;/p&gt;&lt;p&gt;Z方向为 垂直于激光雷达摆臂的方向，与激光器仓平行&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-              </property>
-              <item>
-               <property name="text">
-                <string>X方向</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>Y方向</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>Z方向</string>
-               </property>
-              </item>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLineEdit" name="speed">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>70</height>
-               </size>
-              </property>
-              <property name="text">
-               <string>0.1</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="label_5">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>70</height>
-               </size>
-              </property>
-              <property name="text">
-               <string>m/s（可正负）</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="startProcess">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>70</height>
-               </size>
-              </property>
-              <property name="text">
-               <string>开始数据处理</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
+           <widget class="QPushButton" name="selectVideo">
+            <property name="text">
+             <string>选择视频</string>
+            </property>
+           </widget>
           </item>
          </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_6">
+          <item>
+           <widget class="QLabel" name="label">
+            <property name="text">
+             <string>图片输出路径</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="pictureOutPath">
+            <property name="layoutDirection">
+             <enum>Qt::LeftToRight</enum>
+            </property>
+            <property name="text">
+             <string>E:/01-公司相关/02-渊视/12-测试/2025.9.29 中山大学激光雷达测试/2号视频完整图片</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="selectOutputPath">
+            <property name="text">
+             <string>选择输出路径</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_7">
+          <item>
+           <widget class="QLabel" name="label_3">
+            <property name="text">
+             <string>帧间隔</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="FPS">
+            <property name="text">
+             <string>20</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="startCut">
+            <property name="text">
+             <string>开始剥离</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QProgressBar" name="progressBar">
+          <property name="maximum">
+           <number>90</number>
+          </property>
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_8">
+          <item>
+           <widget class="QLabel" name="label_4">
+            <property name="text">
+             <string>点云输出路径</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="cloudOutPath">
+            <property name="text">
+             <string>E:/01-公司相关/02-渊视/12-测试/2025.9.29 中山大学激光雷达测试/2号视频完整点云</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="selectCloudOutPath">
+            <property name="text">
+             <string>选择输出路径</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_10">
+          <item>
+           <widget class="QLabel" name="label_6">
+            <property name="text">
+             <string>提取阈值</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="yuzhi">
+            <property name="text">
+             <string>50</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_9">
+          <item>
+           <widget class="QComboBox" name="comboBox_pushDirction">
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>70</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;激光雷达设备： | |========\ \ &lt;/p&gt;&lt;p&gt;X方向为 平行于激光雷达摆臂的方向&lt;/p&gt;&lt;p&gt;Y方向为 平行于旋转电机的方向&lt;/p&gt;&lt;p&gt;Z方向为 垂直于激光雷达摆臂的方向，与激光器仓平行&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>X方向</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Y方向</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Z方向</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="speed">
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>70</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>0.1</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_5">
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>70</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>m/s（可正负）</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="startProcess">
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>70</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>开始数据处理</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QPushButton" name="pushButton_3">
+          <property name="text">
+           <string>处理voyis原始数据</string>
+          </property>
+         </widget>
         </item>
         <item>
          <widget class="QGroupBox" name="groupBox">

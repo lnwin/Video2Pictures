@@ -1,4 +1,4 @@
-#ifndef RECONSTRUCTION_H
+﻿#ifndef RECONSTRUCTION_H
 #define RECONSTRUCTION_H
 
 #include <QObject>
@@ -30,6 +30,8 @@ public:
     bool useChaZhi=false;
     std::vector<cv::Vec4f> interpolateFrames(const std::vector<cv::Vec4f>& frame1, const std::vector<cv::Vec4f>& frame2);
     QVector<double> myhdgs;
+
+    int yuzhi=20;
 public slots:
 
     void start2process();
