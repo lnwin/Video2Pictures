@@ -1,4 +1,4 @@
-#include "cloudrender.h"
+﻿#include "cloudrender.h"
 #include <cmath>
 #include <limits>
 #include <algorithm>
@@ -407,7 +407,15 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
             }
             return;
         }
-
+        // —— ③ 左键设置旋转中心（持久开关）—— //
+        if (leftClickSetsFocus_) {
+            // 标记一次“候选点击”，在 release 时根据移动距离确认
+            pendingClickForFocus_ = true;      // ← 新增的临时状态（见下方）
+            pendingClickPos_ = event->pos();   // 记录按下位置
+            setCursor(Qt::CrossCursor);
+            // 不进入旋转
+            return;
+        }
         // —— ③ 你的原始聚焦/旋转逻辑 —— //
         if (needNewFocus) {
             float x = (2.0f * event->x()) / width() - 1.0f;
@@ -434,12 +442,45 @@ void cloudRender::mousePressEvent(QMouseEvent *event)
 }
 
 
-void cloudRender::mouseReleaseEvent(QMouseEvent *)
+void cloudRender::mouseReleaseEvent(QMouseEvent *event)
 {
-    isRotating = false;
-    isPanning = false;
-    setCursor(Qt::OpenHandCursor);
+    if (event->button() == Qt::LeftButton) {
+        // 若开启了“左键设中心”功能，且这次是点击（非明显拖动）
+        if (leftClickSetsFocus_ && pendingClickForFocus_) {
+            const QPoint delta = event->pos() - pendingClickPos_;
+            if (delta.manhattanLength() <= clickPickRadiusPx_) {
+                // —— 做一次拾取：用屏幕坐标投射光线，找最近点 —— //
+                float x = (2.0f * event->x()) / width() - 1.0f;
+                float y = 1.0f - (2.0f * event->y()) / height();
+                QVector3D rayStart = unproject(x, y, 0.0f);
+                QVector3D rayEnd   = unproject(x, y, 1.0f);
+                QVector3D rayDir   = (rayEnd - rayStart).normalized();
+
+                int idx = findClosestIndex(rayStart, rayDir);
+                if (idx >= 0) {
+                    const auto& p = pointCloud[idx];
+                    focusPoint = QVector3D(p[0], p[1], p[2]); // 设为旋转中心
+                    updateCamera();                            // 立即更新视角
+                }
+            }
+            pendingClickForFocus_ = false;
+            setCursor(Qt::CrossCursor);
+            return;
+        }
+
+        // 常规释放：结束旋转
+        isRotating = false;
+        setCursor(Qt::OpenHandCursor);
+        return;
+    }
+
+    if (event->button() == Qt::RightButton) {
+        isPanning = false;
+        setCursor(Qt::OpenHandCursor);
+        return;
+    }
 }
+
 
 void cloudRender::mouseMoveEvent(QMouseEvent *event)
 {
@@ -519,8 +560,9 @@ void cloudRender::leaveEvent(QEvent *)
 }
 void cloudRender::enterEvent(QEvent *)
 {
-    setCursor(needNewFocus ? Qt::CrossCursor
-                           : (pickEnabled_distance ? Qt::CrossCursor : Qt::OpenHandCursor));
+    if (leftClickSetsFocus_) setCursor(Qt::CrossCursor);
+    else if (pickEnabled_distance) setCursor(Qt::CrossCursor);
+    else setCursor(Qt::OpenHandCursor);
 }
 
 
@@ -600,7 +642,7 @@ void cloudRender::b2C_openGL()
     if (pointCloud.empty()) {
         // 空点云时使用默认值
         centroid = QVector3D(0, 0, 0);
-        cameraDistance = 3000.0f;
+        cameraDistance = 1000.0f;
     } else {
         for (const auto &p : pointCloud)
             centroid += QVector3D(p[0], p[1], p[2]);
@@ -840,7 +882,7 @@ void cloudRender::keyPressEvent(QKeyEvent *event)
     }
 
     // 统一倍率：默认 1.0；Shift ×10；Ctrl ×0.1
-    float mul = 0.5f;
+    float mul = 0.2f;
     if (event->modifiers() & Qt::ShiftModifier)   mul *= 10.0f;
     if (event->modifiers() & Qt::ControlModifier) mul *= 0.1f;
 

@@ -21,7 +21,10 @@ static inline bool parseLine_XYZ_I_or_RGB(const QByteArray& line, PcdPoint& p)
     if (n < 3) return false;
 
     p.x = vals[0]; p.y = vals[1]; p.z = vals[2];
+
+    // 先默认“无色”，强度=0
     p.hasColor = false; p.r = p.g = p.b = 0.f;
+    p.intensity = 0.f;
 
     if (n >= 6) { // XYZ + RGB
         float R = vals[3], G = vals[4], B = vals[5];
@@ -31,14 +34,15 @@ static inline bool parseLine_XYZ_I_or_RGB(const QByteArray& line, PcdPoint& p)
         p.g = std::clamp(G*k, 0.f, 1.f);
         p.b = std::clamp(B*k, 0.f, 1.f);
         p.hasColor = true;
-        p.intensity = 0.2126f*p.r + 0.7152f*p.g + 0.0722f*p.b; // 亮度备份
-    } else if (n == 4) { // XYZI
+        // 如果还有第7列当强度（少见），继续兼容
+        if (n >= 7) p.intensity = vals[6];
+    }
+    else if (n >= 4) { // XYZI
         p.intensity = vals[3];
-    } else { // 只有 XYZ
-        p.intensity = 0.f;
     }
     return true;
 }
+
 
 
 
@@ -314,32 +318,31 @@ static inline bool parsePcdLineFast(const QByteArray& line, PcdPoint& p) {
 }
 
 
-// 读取文件并按批量调用 viewer->getCloud2Show(batch)
-// normalizeIntensity=true 时，会把强度归一化到 [0,1]（若文件无强度，则按 Z 归一化）
+// 读取并着色：强度<3000 → 深蓝梯度归一化；强度≥3000 → 亮绿色；若行是XYZRGB则保留原色
 static bool loadTxtAndFeedToViewer(const QString& path,
                                    cloudRender* viewer,
-                                   bool normalizeIntensity = true,
-                                   int batchSize = 1000000) // 更大的 batch
+                                   bool /*normalizeIntensity_ignored*/ = true,
+                                   int batchSize = 1000000)
 {
+    if (!viewer) return false;
     viewer->clearCloud();
 
-    if (!viewer) return false;
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
 
     QProgressDialog dlg(QObject::tr("扫描点云(1/2)…"), QObject::tr("取消"), 0, 0, viewer);
-    dlg.setWindowTitle(QObject::tr("正在加载点云数据"));
-    dlg.setFixedSize(600, 120);   // 一劳永逸
+    dlg.setWindowTitle(QObject::tr("正在读取"));
+    dlg.setFixedSize(520, 110);
     dlg.setWindowModality(Qt::ApplicationModal);
     dlg.setMinimumDuration(0);
     dlg.setAutoClose(false);
     dlg.setAutoReset(false);
 
-    // —— 第一遍：min/max + 行数 —— //
-    bool first = true;
-    float minZ=0.f, maxZ=0.f, minI=0.f, maxI=0.f;
+    // ---------- 第1遍：统计强度范围 ----------
     bool hasAnyIntensity = false;
+    float minI = 0.f, maxI = 0.f;
     qint64 totalLines = 0;
+
     QElapsedTimer tick; tick.start();
     const int UI_UPDATE_MS = 120;
 
@@ -349,74 +352,115 @@ static bool loadTxtAndFeedToViewer(const QString& path,
         ++totalLines;
 
         PcdPoint p;
-        if (!parseLine_XYZ_I_or_RGB(line, p)) { if (tick.elapsed()>UI_UPDATE_MS){ qApp->processEvents(); tick.restart(); } continue; }
+        if (!parseLine_XYZ_I_or_RGB(line, p)) {
+            if (tick.elapsed() > UI_UPDATE_MS) { qApp->processEvents(); tick.restart(); }
+            continue;
+        }
+        if (std::isfinite(p.intensity)) {
+            if (!hasAnyIntensity) { minI = maxI = p.intensity; hasAnyIntensity = true; }
+            else { minI = std::min(minI, p.intensity); maxI = std::max(maxI, p.intensity); }
+        }
 
-        if (first) { minZ=maxZ=p.z; minI=maxI=p.intensity; first=false; }
-        else { minZ=std::min(minZ,p.z); maxZ=std::max(maxZ,p.z);
-            minI=std::min(minI,p.intensity); maxI=std::max(maxI,p.intensity); }
-        if (std::isfinite(p.intensity) && std::fabs(p.intensity) > 1e-12f) hasAnyIntensity = true;
-
-        if (tick.elapsed()>UI_UPDATE_MS) { qApp->processEvents(); tick.restart(); }
+        if (tick.elapsed() > UI_UPDATE_MS) { qApp->processEvents(); tick.restart(); }
     }
 
-    // —— 第二遍：实际读取 + 喂 viewer（批量模式）—— //
+    // 归一化窗口：把 <3000 的强度映射到 [0,1] 用于“深蓝梯度”
+    // - 低端：minI
+    // - 高端：min(maxI, 3500)
+    float lowNormMin = 0.f, lowNormMax = 1.f;
+    if (hasAnyIntensity) {
+        lowNormMin = minI;
+        lowNormMax = std::min(maxI, 7000.f);
+        // 防止窗口过窄或无效
+        if (!(lowNormMax > lowNormMin + 1e-6f)) {
+            // 常见情形：所有 I 都小且相等，比如全是 0 或全是 255
+            // 给一个保底窗口
+            lowNormMin = 0.f;
+            lowNormMax = (maxI > 0.f ? maxI : 3000.f);
+        }
+    }
+
+    // ---------- 第2遍：读取 + 上色 + 批量喂入 ----------
     f.seek(0);
     dlg.setLabelText(QObject::tr("加载点云(2/2)…"));
-    dlg.setRange(0, int(totalLines)); dlg.setValue(0);
+    dlg.setRange(0, int(totalLines));
+    dlg.setValue(0);
 
+    // 颜色定义
+    const QVector3D DEEP_BLUE_MIN(0.0f, 0.04f, 0.20f); // 更暗的深蓝（t=0）
+    const QVector3D DEEP_BLUE_MAX(0.0f, 0.12f, 0.65f); // 更亮的深蓝（t=1）
+    const QVector3D BRIGHT_GREEN (0.0f, 1.0f, 0.0f);   // 亮绿色
+    constexpr float GREEN_THRESHOLD = 3000.0f;
 
-    const bool doI = normalizeIntensity && hasAnyIntensity && (std::fabs(maxI - minI) > 1e-6f);
-    const bool doZ = normalizeIntensity && !hasAnyIntensity && (std::fabs(maxZ - minZ) > 1e-6f);
-    const float invI = doI ? (1.0f / (maxI - minI)) : 1.0f;
-    const float invZ = doZ ? (1.0f / (maxZ - minZ)) : 1.0f;
+    auto lerp = [](const QVector3D& a, const QVector3D& b, float t)->QVector3D {
+        return QVector3D(a.x() + (b.x()-a.x())*t,
+                         a.y() + (b.y()-a.y())*t,
+                         a.z() + (b.z()-a.z())*t);
+    };
+    auto norm01 = [&](float I)->float {
+        // 把 I 映射到 [0,1]，窗口为 [lowNormMin, lowNormMax]，并裁剪
+        float t = 0.f;
+        if (std::isfinite(I)) {
+            t = (I - lowNormMin) / std::max(1e-6f, (lowNormMax - lowNormMin));
+        }
+        return std::clamp(t, 0.0f, 1.0f);
+    };
 
     std::vector<PcdPoint> batch;
     batch.reserve(batchSize);
 
-    qint64 lineNo = 0, total = 0;
+    qint64 fed = 0, lineNo = 0;
     tick.restart();
 
-    viewer->beginBulkLoad(size_t(totalLines)); // ← 关键：禁重绘/重排
+    // 批量阶段禁重绘
+    viewer->beginBulkLoad(size_t(totalLines));
 
     while (!f.atEnd()) {
         if (dlg.wasCanceled()) { f.close(); return false; }
         QByteArray line = f.readLine(); ++lineNo;
 
         PcdPoint p;
-        if (!parseLine_XYZ_I_or_RGB(line, p)) { if (tick.elapsed()>UI_UPDATE_MS){ dlg.setValue(int(lineNo)); qApp->processEvents(); tick.restart(); } continue; }
+        if (!parseLine_XYZ_I_or_RGB(line, p)) {
+            if (tick.elapsed() > UI_UPDATE_MS) { dlg.setValue(int(lineNo)); qApp->processEvents(); tick.restart(); }
+            continue;
+        }
 
-        if (normalizeIntensity) {
-            if (doI) p.intensity = std::clamp((p.intensity - minI) * invI, 0.0f, 1.0f);
-            else if (doZ) p.intensity = std::clamp((p.z - minZ) * invZ, 0.0f, 1.0f);
+        // —— 若该点没有自带 RGB，则按强度阈值着色 —— //
+        if (!p.hasColor) {
+            if (std::isfinite(p.intensity) && p.intensity >= GREEN_THRESHOLD) {
+                p.hasColor = true; p.r = BRIGHT_GREEN.x(); p.g = BRIGHT_GREEN.y(); p.b = BRIGHT_GREEN.z();
+            } else {
+                float t = hasAnyIntensity ? norm01(p.intensity) : 0.f;     // t∈[0,1]
+                QVector3D c = lerp(DEEP_BLUE_MIN, DEEP_BLUE_MAX, t);       // 深蓝梯度
+                p.hasColor = true; p.r = c.x(); p.g = c.y(); p.b = c.z();
+            }
         }
 
         batch.emplace_back(p);
-        ++total;
+        ++fed;
 
         if ((int)batch.size() >= batchSize) {
-           // viewer->clearCloud();
             viewer->getCloud2Show(batch);
             batch.clear();
         }
 
-        if (tick.elapsed()>UI_UPDATE_MS) { dlg.setValue(int(lineNo)); qApp->processEvents(); tick.restart(); }
+        if (tick.elapsed() > UI_UPDATE_MS) { dlg.setValue(int(lineNo)); qApp->processEvents(); tick.restart(); }
     }
-    if (!batch.empty())
-    {
-        // viewer->clearCloud();
-         viewer->getCloud2Show(batch);
-    }
+    if (!batch.empty()) viewer->getCloud2Show(batch);
 
     f.close();
-
     dlg.setValue(int(totalLines));
     dlg.close();
 
-    viewer->endBulkLoad();  // ← 一次排序+重绘
+    viewer->endBulkLoad();  // 一次排序+重绘
 
-    qDebug() << "[loadTxt] fed points =" << total << " file =" << path;
-    return (total > 0);
+    qDebug() << "[loadTxt] fed points =" << fed
+             << " file =" << path
+             << " Imin=" << minI << " Imax=" << maxI
+             << " normWin=[" << lowNormMin << "," << lowNormMax << "]";
+    return (fed > 0);
 }
+
 
 
 
@@ -696,6 +740,20 @@ if (!ok) {
     QMessageBox::warning(this, "处理失败", err);
 } else {
     QMessageBox::information(this, "完成", err);
+}
+}
+
+
+void MainWindow::on_radioButton_4_toggled(bool checked)
+{
+if(checked)
+{
+    ui->openGLWidget->leftClickSetsFocus_=true;
+
+}
+else
+{
+    ui->openGLWidget->leftClickSetsFocus_=false;
 }
 }
 

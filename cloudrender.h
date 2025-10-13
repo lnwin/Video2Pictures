@@ -1,4 +1,4 @@
-#ifndef CLOUDRENDER_H
+﻿#ifndef CLOUDRENDER_H
 #define CLOUDRENDER_H
 
 #include <QOpenGLWidget>
@@ -50,7 +50,8 @@ public:
 
      std::vector<QVector3D> pointColor;   // 与 pointCloud 等长
      bool hasAnyColor_ = false;           // 本批是否包含任一点真彩
-
+     bool leftClickSetsFocus_ = false;   // ← 新增：左键设置旋转中心的持久开关
+     int  clickPickRadiusPx_  = 8;       // ← 点击判定像素阈值（避免拖动也被当作点击）
 
 signals:
     void sendUpdateSIG();
@@ -208,6 +209,9 @@ private:
     }
 
 
+    // 点击设中心的临时状态
+    bool   pendingClickForFocus_ = false;
+    QPoint pendingClickPos_;
 
 
 };

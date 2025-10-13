@@ -295,6 +295,13 @@
            <item>
             <layout class="QHBoxLayout" name="horizontalLayout_3">
              <item>
+              <widget class="QRadioButton" name="radioButton_4">
+               <property name="text">
+                <string>旋转中心</string>
+               </property>
+              </widget>
+             </item>
+             <item>
               <widget class="QRadioButton" name="selectPoin">
                <property name="text">
                 <string>无操作</string>
